@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { configPath, modelName, parseModel, readConfig, sameModel, saveConfig, type Config, type ModelRef } from "./config.ts";
+import { modelName, readConfig, sameModel, type Config, type ModelRef } from "./config.ts";
+import { createSettings } from "./settings.ts";
 
 type Thinking = ReturnType<ExtensionAPI["getThinkingLevel"]>;
 interface Recovery {
@@ -47,8 +48,17 @@ export default function finalModel(pi: ExtensionAPI) {
   let externalSelection = false;
   const claimed = new Set<string>();
 
-  pi.registerFlag("final-model", { type: "string", description: "本次会话的最终输出模型：provider/model-id" });
-  pi.registerFlag("no-final-model", { type: "boolean", default: false, description: "本次会话禁用自动最终输出" });
+  const settings = createSettings(pi, {
+    config: () => config,
+    apply: (next, ctx, clearError) => { config = next; if (clearError) lastError = undefined; status(ctx); },
+    error: () => lastError,
+    needsRecovery: () => !!active,
+    recover: async ctx => {
+      const restored = await restore(ctx);
+      if (restored) lastError = undefined;
+      return restored;
+    },
+  });
 
   function status(ctx: ExtensionContext) {
     if (ctx.hasUI) ctx.ui.setStatus(STATUS, active?.started ? `最终输出 · ${modelName(active.target)}` :
@@ -62,9 +72,6 @@ export default function finalModel(pi: ExtensionAPI) {
   function loadConfig(ctx: ExtensionContext) {
     try {
       config = readConfig();
-      const flag = pi.getFlag("final-model");
-      if (typeof flag === "string" && flag) config = { enabled: true, model: parseModel(flag) };
-      if (pi.getFlag("no-final-model") === true) config.enabled = false;
     } catch (error) {
       config = { enabled: false };
       report(ctx, `配置无效，已停用：${String(error)}`);
@@ -103,7 +110,7 @@ export default function finalModel(pi: ExtensionAPI) {
         externalSelection = false;
         return true;
       } catch (error) {
-        report(ctx, `恢复模型失败，已暂停自动最终输出；修复后运行 /final-model recover。${String(error)}`);
+        report(ctx, `恢复模型失败，已暂停自动最终输出；请打开设置恢复工作模型。${String(error)}`);
         return false;
       } finally {
         if (state.toolsChanged) pi.setActiveTools(state.tools);
@@ -136,9 +143,9 @@ export default function finalModel(pi: ExtensionAPI) {
     }
     loadConfig(ctx);
   }
-  pi.on("session_start", async (_event, ctx) => { await recoverBranch(ctx); });
-  pi.on("session_tree", async (_event, ctx) => { await recoverBranch(ctx); });
-  pi.on("session_shutdown", async (_event, ctx) => { armed = false; await restore(ctx); });
+  pi.on("session_start", async (_event, ctx) => { settings.close(); await recoverBranch(ctx); await settings.start(ctx); });
+  pi.on("session_tree", async (_event, ctx) => { settings.close(); await recoverBranch(ctx); });
+  pi.on("session_shutdown", async (_event, ctx) => { settings.close(); armed = false; await restore(ctx); });
 
   pi.on("model_select", () => {
     if (active && !switching) externalSelection = true;
@@ -174,6 +181,7 @@ export default function finalModel(pi: ExtensionAPI) {
       }
     }
     if (active && !(await restore(ctx))) { ctx.abort(); return; }
+    loadConfig(ctx);
     armed = event.messageType === "user" && !event.prompt.startsWith("[[FINAL]]");
   });
 
@@ -245,43 +253,7 @@ export default function finalModel(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("final-model", {
-    description: "最终输出模型：status / set provider/model-id / on / off / recover",
-    handler: async (args, ctx) => {
-      const [command = "status", ...rest] = args.trim().split(/\s+/).filter(Boolean);
-      const notify = (text: string) => {
-        if (ctx.hasUI) ctx.ui.notify(text, "info");
-        else process.stderr.write(`[pi-final-model] ${text}\n`);
-      };
-      if (command === "status") {
-        notify(`最终模型：${config.enabled ? "开启" : "关闭"}；${config.model ? modelName(config.model) : "未配置"}；${active ? active.started ? "输出中或等待恢复" : "等待最终轮" : "工作阶段"}。配置：${configPath()}${lastError ? `\n最近提示：${lastError}` : ""}`);
-        return;
-      }
-      if (!ctx.isIdle()) { notify("请在任务空闲时修改最终输出配置。"); return; }
-      if (command === "recover") {
-        if (await restore(ctx)) { lastError = undefined; notify("工作模型与工具已恢复。"); }
-        return;
-      }
-      if (active && !(await restore(ctx))) return;
-      try {
-        let next = { ...config };
-        if (command === "set") {
-          const model = parseModel(rest.join(" "));
-          const target = ctx.modelRegistry.find(model.provider, model.id);
-          if (!target) throw new Error(`模型未登记：${modelName(model)}`);
-          if (target.api === "pi-virtual") throw new Error("请选择具体模型，不能使用虚拟路由模型。");
-          if (!ctx.modelRegistry.hasConfiguredAuth(target)) throw new Error("模型认证未配置。");
-          next = { enabled: true, model };
-        } else if (command === "on") {
-          if (!next.model) throw new Error("请先使用 /final-model set provider/model-id 配置模型。");
-          next.enabled = true;
-        } else if (command === "off") next.enabled = false;
-        else throw new Error("用法：/final-model status | set provider/model-id | on | off | recover");
-        saveConfig(next);
-        config = next;
-        lastError = undefined;
-        status(ctx);
-        notify(`最终输出已${config.enabled ? "开启" : "关闭"}${config.model ? `：${modelName(config.model)}` : ""}`);
-      } catch (error) { report(ctx, String(error)); }
-    },
+    description: "设置",
+    handler: async (_args, ctx) => { loadConfig(ctx); await settings.open(ctx); },
   });
 }

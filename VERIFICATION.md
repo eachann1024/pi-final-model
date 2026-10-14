@@ -1,13 +1,20 @@
 # 验收记录
 
-2026-10-14，在本机 Pi 1.2.0、Node.js 22.23.3、Magpie 网关上完成静态检查和真实会话验收，未编写或运行测试用例。
+## 0.2.0 设置页
 
-- `npm run check`：TypeScript 严格检查通过。
-- `npm run pack:check`：Pi package 打包清单检查通过，扩展入口与所需源码完整。
-- CLI 加载：`--final-model`、`--no-final-model` 出现在帮助中，无扩展加载错误。
-- 真实短任务：A 为 `magpie-groups/group/smart`，调用 `read` 读取 `package.json` 后正常结束；只产生一条 `[[FINAL]]` 用户消息，B 为 `magpie-groups/codex/gpt-6-luna`，输出后恢复 A 和 `low` 思考强度，扩展错误为零。
-- RPC 中断：在 B 的 assistant message 开始时发送 abort；最终状态为 `group/smart`、`low`、空闲、待处理消息 0，扩展错误为零。
-- 续接与 print：重开上述会话，A 仍能调用 `read`；B 仍只追加一次，print 输出为 `pi-final-model`，结束后再次恢复 A。
-- 本机安装：已通过 `pi install` 加入个人包列表，并通过 `/final-model set` 保存 Luna 为最终输出模型；工作默认模型仍为 `group/smart`。
+2026-10-14，Pi 1.2.0、Node.js 22.23.3。
 
-真实会话记录位于 `/tmp/pi-final-model-acceptance/`，不随包分发。验证未覆盖所有第三方扩展组合、服务端上下文溢出、凭据到期或进程强制退出；对应路径已做类型检查与源码审阅。原始方案的 Magpie 中间件属于可选备选，此包采用 Pi 侧切模型，无需部署中间件。
+- 静态与打包：`npm run check` 通过 TypeScript 和前端 JavaScript 语法检查；`npm pack --dry-run --json` 确认设置 HTML、JS、服务与配置源码全部随包分发。
+- 入口与首次打开：真实 Pi SDK 加载插件，无扩展错误；注册命令只有 `final-model`，描述为“设置”，专用 CLI 参数为空。RPC 绑定未打开页面，TUI 首次绑定触发一次，重载不重复，手动命令再次触发；系统打开命令在验收中截获，未操作用户浏览器。
+- 目录与持久化：使用本机真实 Pi 模型目录保存 Luna 成功；独立临时配置验收确认首次标记、启用状态和模型写入磁盘。未覆盖用户现有配置。
+- 设置服务：页面与脚本返回 200；未认证、跨 Origin 请求返回 403；任务忙碌时保存返回 409；路由组选择返回 400；原会话设置服务关闭后拒绝访问。
+- 任务回归：真实 Magpie 短任务由 `group/smart` 调用 `read` 读取 `package.json`，随后仅追加一轮 `codex/gpt-6-luna`，最后恢复 `group/smart` 和 `low`，扩展错误为零。
+- 子代理：发现旧版最终模型插件会介入子会话，已按 `PI_SUBAGENT_CHILD=1` 跳过全部注册；修复后同协议恢复的 Astra 子代理正常完成模型校验。
+- 代码复核：只读子代理分别定位参考项目入口与保存链、TypeSafe 图形与 CSS；主会话读取原片段。修复焦点刷新覆盖新选择、保存响应丢失后误报成功两处竞态。
+- 视觉依据：核对 TypeSafe 原站 HTML/CSS、公开品牌图；采用原站 `#f386a1 / #1e1e1e / #fefefe / #dedede`、细边框与窗口结构。设置页使用系统字体，未引入原站字体或追踪代码。
+
+云电脑 `box` SSH 连接关闭，未完成真实浏览器的视觉、点击和窄屏验收；系统浏览器打开也只核对调用和生命周期，不能视为已打开验收。没有编写或运行测试用例。任务回归记录与原站资料在 `/tmp/pi-final-model-design/`，不随包分发。
+
+## 0.1.0 已有流程
+
+此前已在真实 Pi / Magpie 会话确认：工具执行后仅追加一次 B，B 中断后恢复模型和思考强度，续接会话后工具可用，print 输出最后答复。对应临时记录在 `/tmp/pi-final-model-acceptance/`。未覆盖所有第三方扩展组合、服务端上下文溢出、凭据到期或强制退出。
