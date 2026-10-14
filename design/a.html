@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN" data-version="0.2.0">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>01 · 官网云雾 · Final Model</title>
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<style>
+:root{color-scheme:light;--pink:#f386a1;--ink:#1e1e1e;--paper:#fefefe;--line:#dedede;--muted:#676767;--green:#037a44;--error:#a12538;--mono:ui-monospace,"SFMono-Regular",Consolas,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--pink);color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}button,input{font:inherit}button{color:inherit;cursor:pointer}button:disabled{cursor:default;opacity:.45}button:focus-visible,input:focus-visible{outline:2px solid var(--ink);outline-offset:5px}[hidden]{display:none!important}
+.topbar{height:76px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--ink);padding:0 4.5vw;background:var(--paper)}.brand{display:flex;align-items:center;gap:13px;font-weight:600;font-size:21px;letter-spacing:-.7px}.brand-icon{display:block;flex:none}.topmeta{display:flex;gap:26px;align-items:center;font:13px var(--mono)}.topmeta span:first-child{letter-spacing:.12em}.version{color:var(--muted)}
+main{max-width:1440px;margin:auto;display:grid;grid-template-columns:minmax(340px, .92fr) minmax(440px,1.08fr);min-height:calc(100svh - 76px)}.intro{position:relative;display:flex;flex-direction:column;padding:66px 12% 36px 14%;border-right:1px solid var(--ink);overflow:hidden}.eyebrow{display:flex;align-items:center;gap:8px;font:12px var(--mono);letter-spacing:.06em}.eyebrow::before{content:"";width:7px;height:7px;background:currentColor}.intro h2{font-size:clamp(38px,4.2vw,60px);font-weight:500;letter-spacing:-.06em;line-height:1.24;margin:32px 0 50px}.intro h2 span{display:block}.diagram{margin:auto 0 50px;position:relative;max-width:360px}.window{border:1px solid var(--ink);background:var(--pink);box-shadow:4px 4px 0 var(--ink);position:relative}.window-title{height:31px;padding:0 11px;border-bottom:1px solid var(--ink);display:flex;align-items:center;justify-content:space-between;font:12px var(--mono)}.window-title::after{content:"";width:9px;height:9px;border:1px solid currentColor}.window-body{padding:18px 19px 21px}.window-label{font-size:13px;margin-bottom:5px}.model-name{font-size:19px;font-weight:500;overflow-wrap:anywhere;line-height:1.4}.window.work{width:83%}.window.final{width:88%;margin-left:12%;background:var(--paper)}.window.final .window-title{background:var(--ink);color:var(--paper)}.connector{height:43px;width:1px;background:var(--ink);margin:0 0 0 49%;position:relative}.connector::after{content:"";position:absolute;bottom:1px;left:-4px;width:8px;height:8px;border-right:1px solid var(--ink);border-bottom:1px solid var(--ink);transform:rotate(45deg)}.restore{display:flex;gap:9px;align-items:center;margin-top:24px;font-size:13px}.restore svg{width:17px;height:17px}.intro-foot{display:flex;justify-content:space-between;align-items:center;font:12px var(--mono);border-top:1px solid #1e1e1e55;padding-top:20px}.cross{font-size:22px;line-height:12px}
+.settings{background:var(--paper);padding:62px clamp(30px,4.5vw,68px) 36px;display:flex;flex-direction:column}.heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:36px}.heading h1{margin:0;font-size:36px;font-weight:500;letter-spacing:-1.5px}.section-number{font:12px var(--mono);color:var(--muted)}.enable-row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:0 0 26px;border-bottom:1px solid var(--ink)}.enable-row label{font-size:17px;cursor:pointer}.toggle-wrap{position:relative;flex:none;width:46px;height:26px}.toggle-wrap input{position:absolute;inset:0;margin:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:1}.toggle-track{display:block;width:46px;height:26px;border:1px solid var(--ink);background:#ededed;transition:background 140ms ease}.toggle-track::after{content:"";display:block;background:var(--ink);width:16px;height:16px;position:absolute;left:5px;top:5px;transition:transform 140ms ease}.toggle-wrap input:checked+.toggle-track{background:var(--pink)}.toggle-wrap input:checked+.toggle-track::after{transform:translateX(20px)}.toggle-wrap input:focus-visible+.toggle-track{outline:2px solid var(--ink);outline-offset:5px}.toggle-wrap input:disabled{cursor:default}.toggle-wrap:has(input:disabled){opacity:.4}
+fieldset{padding:0;margin:28px 0 0;border:0;min-width:0}legend{padding:0;margin-bottom:17px;font-size:17px}.search{display:flex;align-items:center;border:1px solid var(--line);height:47px;padding:0 14px;gap:10px;margin-bottom:16px}.search:focus-within{border-color:var(--ink)}.search svg{width:17px;height:17px;flex:none}.search input{border:0;background:transparent;outline:none;width:100%;min-width:0;color:var(--ink);font-size:14px}.search input::placeholder{color:#777}.search input:focus-visible{outline:none}.models{max-height:350px;overflow:auto;scrollbar-width:thin;scrollbar-color:#bcbcbc transparent;padding:1px 4px 4px 1px;margin:0 -4px 0 -1px}.provider{margin:20px 0 8px;color:var(--muted);font:11px var(--mono);letter-spacing:.04em;overflow-wrap:anywhere}.provider:first-child{margin-top:2px}.model{position:relative;display:flex;align-items:center;gap:12px;border:1px solid var(--line);padding:17px 15px;margin-bottom:8px;cursor:pointer;min-height:77px;transition:background 140ms ease,border-color 140ms ease}.model.selected{border-color:var(--ink);background:#fdf1f4;box-shadow:2px 2px 0 var(--ink)}.model:hover{border-color:var(--ink)}.model input{position:absolute;inset:0;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}.model:has(input:focus-visible){outline:2px solid var(--ink);outline-offset:2px}.model-copy{min-width:0;flex:1}.model-title{display:block;font-size:16px;font-weight:500;overflow-wrap:anywhere}.model-id{display:block;font:11px/1.6 var(--mono);color:var(--muted);overflow-wrap:anywhere;margin-top:3px}.capacity{font:11px var(--mono);white-space:nowrap;color:var(--muted)}.radio{width:15px;height:15px;border:1px solid var(--ink);border-radius:50%;flex:none;display:grid;place-items:center}.selected .radio::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--ink)}.empty{border:1px dashed var(--line);padding:28px 20px;font-size:14px;line-height:1.8;color:var(--muted)}.empty strong{display:block;font-weight:500;color:var(--ink);margin-bottom:6px}.missing{margin:14px 0 0;font-size:14px;color:var(--error);overflow-wrap:anywhere}
+.feedback{margin-top:24px;padding:13px 15px;background:#fff4f4;border-left:2px solid var(--error);font-size:14px;line-height:1.7}.feedback p{margin:0;overflow-wrap:anywhere}.action{background:var(--ink);color:var(--paper);border:1px solid var(--ink);padding:8px 13px;font-size:13px;min-height:38px;margin-top:10px}.action:hover{background:#3a3a3a}.settings-foot{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:auto;padding-top:36px;font:12px/1.5 var(--mono);color:var(--muted)}.save-status{display:flex;align-items:center;gap:7px}.save-status::before{content:"";width:5px;height:5px;background:currentColor}.save-status[data-state=saved]{color:var(--green)}.save-status[data-state=error]{color:var(--error)}.foot-mark{font-size:20px;color:var(--ink)}
+@media(min-width:1441px){main{border-left:1px solid var(--ink);border-right:1px solid var(--ink)}}
+@media(max-width:809px){.topbar{height:62px;padding:0 22px}.brand{font-size:18px}.topmeta{gap:14px;font-size:11px}main{display:block;min-height:calc(100svh - 62px)}.intro{padding:28px 26px 30px;border-right:0;border-bottom:1px solid var(--ink)}.intro h2{font-size:33px;margin:20px 0 0;letter-spacing:-1.5px}.intro h2 span{display:inline}.intro h2 span+span::before{content:" "}.diagram,.intro-foot{display:none}.settings{padding:28px 26px 28px;min-height:520px}.heading{margin-bottom:27px}.heading h1{font-size:29px}.models{max-height:340px}.settings-foot{padding-top:28px}}
+@media(max-width:380px){.topmeta span:first-child{display:none}.intro,.settings{padding-left:20px;padding-right:20px}.intro h2{font-size:29px}.capacity{display:none}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}}
+
+:root{--pink:#e4d9fa;--paper:#fefefe;--ink:#202022;--line:#dedde3;--muted:#74717c}
+body{background:#fdfdfd url("background-a.jpg") center top / 100% auto no-repeat;min-height:100svh}
+.topbar{height:82px;background:transparent;border:0;max-width:1240px;margin:auto;padding:0 36px}
+.brand{font-size:20px}.brand-icon{width:32px;height:32px}.topmeta{font-size:11px}
+main{max-width:1168px;min-height:700px;margin:48px auto 60px;border:0!important;grid-template-columns:.95fr 1.05fr}
+.intro{background:transparent;border:0;padding:42px 56px 32px 28px}
+.intro h2{font-size:54px;letter-spacing:-3px;line-height:1.2;margin:30px 0 60px}
+.eyebrow{font-size:11px}.diagram{margin:auto 0 35px;max-width:340px}
+.window{background:#ffffffb8;box-shadow:3px 3px 0 #202022;backdrop-filter:blur(8px)}
+.window.final{background:#fff}.window-title{height:28px}.window-body{padding:16px 18px}
+.intro-foot{border-color:#20202224}.settings{background:#ffffffed;border:1px solid #343039;padding:40px 38px 28px;box-shadow:5px 5px 0 #25222c12;min-width:0;backdrop-filter:blur(18px)}
+.heading h1{font-size:30px}.heading{margin-bottom:30px}.enable-row label,legend{font-size:15px}.enable-row{border-color:var(--line)}
+.model{min-height:72px;padding:14px}.model.selected{background:#f0eafa;box-shadow:2px 2px 0 #202022}.model-title{font-size:15px}.model-id{font-size:10px}.models{max-height:306px}
+.settings-foot{padding-top:30px}.section-number{font-size:11px}.window-label,.restore{font-size:12px}
+@media(max-width:809px){body{background-size:auto 700px}.topbar{padding:0 22px;height:68px}main{display:block;margin:10px 20px 30px;min-height:0}.intro{padding:20px 4px 28px}.intro h2{font-size:34px;letter-spacing:-1.5px;margin:18px 0 0}.settings{padding:28px 24px;min-height:560px}}
+
+</style>
+
+</head>
+<body>
+<header class="topbar"><div class="brand"><img class="brand-icon" src="icon.svg" width="32" height="32" alt="">Final Model</div><div class="topmeta"><span>PI EXTENSION</span><span class="version" id="version"></span></div></header>
+<main>
+<aside class="intro" aria-label="模型分工预览">
+  <div class="eyebrow">THE FINAL WORD</div>
+  <h2><span>专注执行。</span><span>从容收尾。</span></h2>
+  <div class="diagram">
+    <div class="window work"><div class="window-title"><span>01 / WORK</span></div><div class="window-body"><div class="window-label">执行任务</div><div class="model-name" id="working-model">当前模型</div></div></div>
+    <div class="connector" aria-hidden="true"></div>
+    <div class="window final"><div class="window-title"><span>02 / FINAL</span></div><div class="window-body"><div class="window-label">整理最终答复</div><div class="model-name" id="final-model">选择你的模型</div></div></div>
+    <div class="restore"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M6 8H15a6 6 0 0 1 0 12H9M6 8l5-5M6 8l5 5"/></svg><span id="restore-label">完成后，回到工作模型</span></div>
+  </div>
+  <div class="intro-foot"><span>A → B → A</span><span class="cross" aria-hidden="true">+</span></div>
+</aside>
+<section class="settings" aria-labelledby="settings-title">
+  <div class="heading"><h1 id="settings-title">设置</h1><span class="section-number" aria-hidden="true">[ 01—02 ]</span></div>
+  <div class="enable-row"><label for="enabled">使用独立的最终答复模型</label><span class="toggle-wrap"><input id="enabled" type="checkbox" role="switch" disabled><span class="toggle-track" aria-hidden="true"></span></span></div>
+  <fieldset><legend>最终答复模型</legend>
+    <label class="search" for="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg><input id="search" type="search" placeholder="搜索模型或提供商" aria-label="搜索模型或提供商" autocomplete="off" disabled></label>
+    <div id="models" class="models" role="radiogroup" aria-label="最终答复模型" aria-busy="true"><div class="empty">正在读取模型…</div></div>
+    <p id="missing" class="missing" hidden></p>
+  </fieldset>
+  <div class="feedback" id="feedback" hidden role="alert"><p id="message"></p><button class="action" id="retry" type="button" hidden>重试</button><button class="action" id="recover" type="button" hidden>恢复工作模型</button></div>
+  <footer class="settings-foot"><span id="save-status" class="save-status" role="status" aria-live="polite">正在连接…</span><span class="foot-mark" aria-hidden="true">↗</span></footer>
+</section>
+</main>
+
+<script>
+const models=[{name:'GPT-6-Luna',id:'codex/gpt-6-luna',size:'256K'},{name:'Gemini 3.8 Flash',id:'antigravity/gemini-3.8-flash',size:'256K'}];
+const enabled=document.getElementById('enabled');enabled.disabled=false;enabled.checked=true;
+const search=document.getElementById('search');search.disabled=false;
+let selected=models[0].id;
+document.getElementById('version').textContent='设计预览';document.getElementById('working-model').textContent='smart';
+function render(){const list=document.getElementById('models');list.replaceChildren();list.setAttribute('aria-busy','false');const heading=document.createElement('p');heading.className='provider';heading.textContent='magpie-groups';list.append(heading);for(const model of models.filter(m=>(m.name+' '+m.id).toLowerCase().includes(search.value.toLowerCase()))){const label=document.createElement('label');label.className='model'+(model.id===selected?' selected':'');const input=document.createElement('input');input.type='radio';input.name='model';input.checked=model.id===selected;input.onchange=()=>{selected=model.id;render()};const copy=document.createElement('span');copy.className='model-copy';const name=document.createElement('span');name.className='model-title';name.textContent=model.name;const id=document.createElement('span');id.className='model-id';id.textContent=model.id;copy.append(name,id);const cap=document.createElement('span');cap.className='capacity';cap.textContent=model.size;const radio=document.createElement('span');radio.className='radio';label.append(input,copy,cap,radio);list.append(label)}document.getElementById('final-model').textContent=enabled.checked?models.find(m=>m.id===selected).name:'跟随工作模型';document.getElementById('restore-label').textContent=enabled.checked?'完成后，回到工作模型':'由工作模型完成全部答复'}
+search.oninput=render;enabled.onchange=render;render();document.getElementById('save-status').textContent='预览模式 · 不修改配置';
+</script>
+</body>
+</html>

@@ -9,10 +9,11 @@ export class SettingsError extends Error {
 /** A session-owned loopback bridge. Only the URL fragment holds the access token. */
 export async function startSettingsWeb(snapshot: () => unknown, update: (value: unknown) => Promise<void>) {
   const token = randomBytes(24).toString("hex");
-  const [page, script, manifest] = await Promise.all([
+  const [page, script, manifest, icon] = await Promise.all([
     readFile(new URL("./settings.html", import.meta.url), "utf8"),
     readFile(new URL("./settings.js", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("./icon.svg", import.meta.url), "utf8"),
   ]);
   const version = String(JSON.parse(manifest).version);
   const html = page.replace("__VERSION__", /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version) ? version : "");
@@ -43,6 +44,10 @@ export async function startSettingsWeb(snapshot: () => unknown, update: (value: 
     res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
     if (req.headers.host !== origin.slice(7) || (req.headers.origin && req.headers.origin !== origin)) {
       res.writeHead(403).end(); return;
+    }
+    if (req.method === "GET" && req.url === "/icon.svg") {
+      res.setHeader("Content-Type", "image/svg+xml");
+      res.end(icon); return;
     }
     if (req.method === "GET" && (req.url === "/" || req.url === "/settings.js")) {
       res.setHeader("Content-Type", req.url === "/" ? "text/html; charset=utf-8" : "text/javascript; charset=utf-8");
