@@ -17,6 +17,10 @@ export async function startSettingsWeb(snapshot: () => unknown, update: (value: 
   ]);
   const version = String(JSON.parse(manifest).version);
   const html = page.replace("__VERSION__", /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version) ? version : "");
+  const assets = new Map(await Promise.all([
+    ["/cloud-grain.png", "cloud-grain.png", "image/png"],
+    ...["arrow-right", "check", "chevron-down", "search"].map(name => [`/icons/${name}.svg`, `icons/${name}.svg`, "image/svg+xml"]),
+  ].map(async ([route, path, type]) => [route, { body: await readFile(new URL(`./assets/${path}`, import.meta.url)), type }] as const)));
   let origin = "";
   let closed = false;
   let queue = Promise.resolve();
@@ -48,6 +52,11 @@ export async function startSettingsWeb(snapshot: () => unknown, update: (value: 
     if (req.method === "GET" && req.url === "/icon.svg") {
       res.setHeader("Content-Type", "image/svg+xml");
       res.end(icon); return;
+    }
+    const asset = assets.get(req.url || "");
+    if (req.method === "GET" && asset) {
+      res.setHeader("Content-Type", asset.type);
+      res.end(asset.body); return;
     }
     if (req.method === "GET" && (req.url === "/" || req.url === "/settings.js")) {
       res.setHeader("Content-Type", req.url === "/" ? "text/html; charset=utf-8" : "text/javascript; charset=utf-8");

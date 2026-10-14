@@ -48,17 +48,29 @@ function preview() {
   $('enabled').disabled = !draft.model && !data.models.length;
   const selected = data.models.find(model => model.value === draft.model);
   $('working-model').textContent = data.workingModel;
-  $('final-model').textContent = draft.enabled ? selected?.name || draft.model || '选择你的模型' : '跟随工作模型';
-  $('restore-label').textContent = draft.enabled ? '完成后，回到工作模型' : '由工作模型完成全部答复';
+  $('final-model').textContent = draft.enabled ? selected?.name || draft.model || '选择模型' : data.workingModel;
+  $('selected-name').textContent = selected?.name || draft.model || '选择模型';
+  $('selected-id').textContent = selected ? selected.provider + ' / ' + selected.id : '';
+  $('selected-id').hidden = !selected;
   $('missing').hidden = !draft.model || !!selected;
   $('missing').textContent = selected || !draft.model ? '' : '当前模型不可用，请重新选择：' + draft.model;
   for (const input of $('models').querySelectorAll('input')) {
     input.checked = input.value === draft.model;
-    input.closest('.model').classList.toggle('selected', input.checked);
+    input.closest('.model-choice').classList.toggle('selected', input.checked);
   }
+}
+function chooser(open, focus = true) {
+  $('model-chooser').hidden = !open;
+  $('model-open').setAttribute('aria-expanded', String(open));
+  if (open) {
+    $('search').value = '';
+    renderModels();
+    if (focus) $('search').focus();
+  } else if (focus) $('model-open').focus();
 }
 function renderModels() {
   const container = $('models');
+  const focusedValue = container.contains(document.activeElement) ? document.activeElement.value : undefined;
   container.replaceChildren();
   container.setAttribute('aria-busy', 'false');
   const query = $('search').value.trim().toLocaleLowerCase();
@@ -83,24 +95,29 @@ function renderModels() {
       container.append(heading);
     }
     const label = document.createElement('label');
-    label.className = 'model';
+    label.className = 'model-choice';
     const input = document.createElement('input');
     input.type = 'radio'; input.name = 'final-model'; input.value = model.value;
     input.setAttribute('aria-label', model.name + ' · ' + model.provider);
-    input.onchange = () => { draft.model = model.value; change(); };
+    input.onchange = () => { draft.model = model.value; change(); chooser(false); };
     const copy = document.createElement('span');
     copy.className = 'model-copy';
-    const name = document.createElement('span'); name.className = 'model-title'; name.textContent = model.name;
+    const name = document.createElement('span'); name.className = 'model-name'; name.textContent = model.name;
     const id = document.createElement('span'); id.className = 'model-id'; id.textContent = model.id;
     copy.append(name, id);
     const capacity = document.createElement('span'); capacity.className = 'capacity';
     capacity.textContent = model.contextWindow ? Math.round(model.contextWindow / 1000) + 'K' : '';
-    capacity.setAttribute('aria-label', '上下文 ' + capacity.textContent);
-    const radio = document.createElement('span'); radio.className = 'radio'; radio.setAttribute('aria-hidden', 'true');
-    label.append(input, copy, capacity, radio);
+    if (model.contextWindow) capacity.setAttribute('aria-label', '上下文 ' + capacity.textContent);
+    const check = document.createElement('img'); check.className = 'icon'; check.src = '/icons/check.svg'; check.alt = '';
+    label.append(input, copy, capacity, check);
     container.append(label);
   }
   preview();
+  if (focusedValue !== undefined) {
+    const input = [...container.querySelectorAll('input')].find(option => option.value === focusedValue);
+    if (input) input.focus();
+    else $('search').focus();
+  }
 }
 function change() {
   revision++;
@@ -126,10 +143,12 @@ async function save() {
       const currentRevision = revision;
       status('正在保存…');
       const next = await request('PUT', body);
+      const modelsChanged = JSON.stringify(data.models) !== JSON.stringify(next.models);
       saved = { enabled: next.enabled, model: next.model };
       data = next;
       if (revision === currentRevision) draft = { ...saved };
-      preview();
+      if (modelsChanged) renderModels();
+      else preview();
     }
     if (!dirty()) status('已自动保存', 'saved');
     else status('选择模型后保存');
@@ -141,31 +160,39 @@ async function save() {
     feedback(error.message, true, data.recovery);
   } finally { saving = false; }
 }
-async function load() {
-  if (loading || saving || dirty()) return;
+async function load(silent = false) {
+  if (loading || saving || dirty() || (silent && failed)) return;
   loading = true;
   const currentRevision = revision;
-  status('正在连接…');
+  if (!silent) status('正在连接…');
   try {
     const next = await request('GET');
     // Refocusing the tab may race with a new selection and its PUT.
     if (revision !== currentRevision || saving || dirty()) return;
+    const modelsChanged = JSON.stringify(data?.models) !== JSON.stringify(next.models);
     data = next;
     draft = { enabled: data.enabled, model: data.model };
     saved = { ...draft };
     failed = false;
     $('search').disabled = false;
-    renderModels();
+    $('model-open').disabled = false;
+    if (modelsChanged) renderModels();
+    else preview();
     feedback(data.error, false, data.recovery);
     status(data.busy ? '任务进行中' : '改动自动保存');
   } catch (error) {
     if (revision !== currentRevision || saving || dirty()) return;
+    failed = true;
     status('连接失败', 'error');
     feedback(error.message, true);
   } finally { loading = false; }
 }
 $('enabled').onchange = () => { draft.enabled = $('enabled').checked; change(); };
 $('search').oninput = renderModels;
+$('model-open').onclick = () => chooser($('model-chooser').hidden);
+$('model-chooser').onkeydown = event => {
+  if (event.key === 'Escape') { event.preventDefault(); chooser(false); }
+};
 $('retry').onclick = () => { if (dirty()) void save(); else void load(); };
 $('recover').onclick = async () => {
   if (saving || loading) return;
@@ -173,10 +200,13 @@ $('recover').onclick = async () => {
   loading = true;
   saving = true;
   try {
-    data = await request('PUT', { action: 'recover' });
-    preview();
-    feedback(dirty() ? '工作模型已恢复，请重试保存修改。' : '', !!dirty());
-    status(dirty() ? '尚未保存' : '工作模型已恢复', dirty() ? 'error' : 'saved');
+    const next = await request('PUT', { action: 'recover' });
+    const modelsChanged = JSON.stringify(data.models) !== JSON.stringify(next.models);
+    data = next;
+    if (modelsChanged) renderModels();
+    else preview();
+    feedback(dirty() ? '最终整理状态已恢复，请重试保存修改。' : '', !!dirty());
+    status(dirty() ? '尚未保存' : '最终整理状态已恢复', dirty() ? 'error' : 'saved');
   } catch (error) {
     status(dirty() ? '尚未保存' : '恢复失败', 'error');
     feedback(error.message, !!dirty(), true);
@@ -185,5 +215,9 @@ $('recover').onclick = async () => {
 window.addEventListener('beforeunload', event => {
   if (dirty() || saving) { event.preventDefault(); event.returnValue = ''; }
 });
-window.addEventListener('focus', () => { if (!failed && !dirty()) void load(); });
+window.addEventListener('focus', () => { if (!failed && !dirty()) void load(true); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) void load(true);
+});
+setInterval(() => { if (!document.hidden) void load(true); }, 5000);
 void load();

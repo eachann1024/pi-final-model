@@ -48,7 +48,7 @@ export function createSettings(pi: ExtensionAPI, host: SettingsHost) {
             if (!value || typeof value !== "object" || Array.isArray(value)) throw new SettingsError("设置格式无效。");
             const input = value as Record<string, unknown>;
             if (input.action === "recover" && Object.keys(input).length === 1) {
-              if (!(await host.recover(ctx))) throw new SettingsError("暂时无法恢复工作模型，请检查原模型与认证后重试。", 409);
+              if (!(await host.recover(ctx))) throw new SettingsError("暂时无法恢复最终整理状态，请稍后重试。", 409);
               return;
             }
             if (Object.keys(input).some(key => key !== "enabled" && key !== "model") || typeof input.enabled !== "boolean" || (input.model !== null && typeof input.model !== "string")) {
@@ -64,7 +64,7 @@ export function createSettings(pi: ExtensionAPI, host: SettingsHost) {
               if (!target || target.api === "pi-virtual" || !ctx.modelRegistry.hasConfiguredAuth(target)) throw new SettingsError("模型已不可用，请重新选择。");
             }
             if (input.enabled && !model) throw new SettingsError("请先选择最终答复模型。");
-            if (host.needsRecovery() && !(await host.recover(ctx))) throw new SettingsError("请先恢复工作模型，再保存设置。", 409);
+            if (host.needsRecovery() && !(await host.recover(ctx))) throw new SettingsError("请先恢复最终整理状态，再保存设置。", 409);
             if (generation !== currentGeneration || !ctx.isIdle()) throw new SettingsError("会话状态已变化，请重试。", 409);
             const next: Config = { enabled: input.enabled, model, settingsOpened: true };
             saveConfig(next);
