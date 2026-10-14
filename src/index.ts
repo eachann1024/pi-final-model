@@ -35,6 +35,8 @@ function isRecovery(value: unknown): value is Recovery {
 }
 
 export default function finalModel(pi: ExtensionAPI) {
+  // Child agents own their model and final output contract.
+  if (process.env.PI_SUBAGENT_CHILD === "1") return;
   let config: Config = { enabled: false };
   let active: Active | undefined;
   let armed = false;
