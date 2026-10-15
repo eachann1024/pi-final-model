@@ -3,6 +3,7 @@ import { readFileSync, statSync } from "node:fs";
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 
 export const CLAIM = "pi-final-model/claim";
+export const CLAIM_END = "pi-final-model/claim-end";
 export const PREPARED = "pi-final-model/prepared";
 export const LEGACY_MARK = "pi-final-model/mark";
 export interface Receipt {
@@ -52,7 +53,8 @@ export function applied(receipt: Receipt, branch: SessionEntry[]): boolean {
   return !!edit && branch.indexOf(edit) > prepared && edit.type === "context_edit" && edit.replacement !== null && contentHash(edit.replacement.content) === receipt.hash;
 }
 export function verified(receipt: Receipt, branch: SessionEntry[]): boolean {
-  return applied(receipt, branch) && branch.some(entry => entry.type === "custom" && entry.customType === CLAIM && isReceipt(entry.data) && entry.data.requestId === receipt.requestId && entry.data.hash === receipt.hash);
+  return applied(receipt, branch) && branch.some(entry => entry.type === "custom" && entry.customType === CLAIM && isReceipt(entry.data) && entry.data.requestId === receipt.requestId && entry.data.hash === receipt.hash)
+    && branch.some(entry => entry.type === "custom" && entry.customType === CLAIM_END && isReceipt(entry.data) && entry.data.requestId === receipt.requestId && entry.data.hash === receipt.hash);
 }
 export function isLegacyMark(message: { role: string; customType?: string }): boolean {
   return message.role === "custom" && message.customType === LEGACY_MARK;

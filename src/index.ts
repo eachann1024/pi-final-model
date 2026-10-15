@@ -5,7 +5,7 @@ import { convertToLlm, estimateTokens, SettingsManager, VERSION, type ExtensionA
 import { errorKind, logPath, writeLog } from "./log.ts";
 import { configRevision, modelName, readConfig, sameModel, type Config } from "./config.ts";
 import { createSettings } from "./settings.ts";
-import { applied, CLAIM, contentHash, durableBranch, isLegacyMark, isReceipt, LEGACY_MARK, PREPARED, verified, type Receipt } from "./receipt.ts";
+import { applied, CLAIM, CLAIM_END, contentHash, durableBranch, isLegacyMark, isReceipt, LEGACY_MARK, PREPARED, verified, type Receipt } from "./receipt.ts";
 
 const STATUS = "pi-final-model";
 const INSTRUCTION = "请根据用户需求、实际执行过程和工具结果，重写上一条助手最终答复，直接回答原始用户任务。遵循用户要求的语言、长度和格式，保留必要的确认问题；区分已完成、未验证和受阻事项，不虚构验证、提交或发布结果。不要继续执行任务、调用工具、询问下一项任务、提及换模型或添加模型标记。";
@@ -95,7 +95,8 @@ export default function finalModel(pi: ExtensionAPI) {
           log(ctx, "not_applied", { requestId: receipt.requestId, sourceId: receipt.sourceId, reason: "edit_missing_or_superseded" });
           continue;
         }
-        if (!verified(receipt, branch)) pi.appendEntry(CLAIM, receipt);
+        if (!branch.some(entry => entry.type === "custom" && entry.customType === CLAIM && isReceipt(entry.data) && entry.data.requestId === receipt.requestId)) pi.appendEntry(CLAIM, receipt);
+        if (!branch.some(entry => entry.type === "custom" && entry.customType === CLAIM_END && isReceipt(entry.data) && entry.data.requestId === receipt.requestId)) pi.appendEntry(CLAIM_END, receipt);
         if (!verified(receipt, durableBranch(ctx))) throw new Error("Receipt not durable");
         accounted.add(receipt.requestId);
         log(ctx, "applied", { requestId: receipt.requestId, sourceId: receipt.sourceId, model: receipt.model });
@@ -129,17 +130,19 @@ export default function finalModel(pi: ExtensionAPI) {
     settings.close(); load(ctx); settle(ctx);
     log(ctx, "loaded");
   }
-  pi.registerEntryRenderer<Receipt>(CLAIM, entry => {
+  const sparkleRenderer: Parameters<ExtensionAPI["registerEntryRenderer"]>[1] = entry => {
     if (!current || !isReceipt(entry.data)) return undefined;
     const receipt = entry.data;
     return {
       invalidate() {},
-      render(width) {
+      render(width: number) {
         try { return current && verified(receipt, durableBranch(current)) ? new Text(sparkle, 0, 0).render(width) : []; }
         catch { return []; }
       },
     };
-  });
+  };
+  pi.registerEntryRenderer<Receipt>(CLAIM, sparkleRenderer);
+  pi.registerEntryRenderer<Receipt>(CLAIM_END, sparkleRenderer);
   // Never render legacy markers without trustworthy source/hash evidence.
   pi.registerMessageRenderer(LEGACY_MARK, () => new Text("", 0, 0));
   pi.on("context", event => ({ messages: event.messages.filter(message => !isLegacyMark(message)) }));
@@ -256,6 +259,7 @@ export default function finalModel(pi: ExtensionAPI) {
         { type: "custom" as const, customType: PREPARED, data: receipt },
         { type: "context_edit" as const, targetId: receipt.sourceId, replacement: { content } },
         { type: "custom" as const, customType: CLAIM, data: receipt },
+        { type: "custom" as const, customType: CLAIM_END, data: receipt },
       ] };
     } catch (error) {
       const reason = ctx.signal?.aborted || controller.signal.aborted ? "cancelled" : errorKind(error);
