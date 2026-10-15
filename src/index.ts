@@ -13,7 +13,18 @@ const STATE = "pi-final-model/recovery";
 const CLAIM = "pi-final-model/claim";
 const TOOLS = "pi-final-model/restored-tools";
 const STATUS = "pi-final-model";
-const FINAL_INSTRUCTION = "请根据上面的用户需求、实际执行过程和工具结果，直接输出给用户的最终答复。遵循用户要求的语言、长度和格式；区分已完成、未验证和受阻事项，不虚构验证、提交或发布结果。若仍需用户决定或提供信息，保留必要问题。不要继续执行任务、调用工具、提及内部换模型过程，也不要声称整个任务一定已完成。";
+const FINAL_INSTRUCTION = "请根据上面的用户需求、实际执行过程和工具结果，直接输出给用户的最终答复。遵循用户要求的语言、长度和格式；区分已完成、未验证和受阻事项，不虚构验证、提交或发布结果。若仍需用户决定或提供信息，保留必要问题。不要继续执行任务、调用工具、提及内部换模型过程，也不要声称整个任务一定已完成。不要在答复开头添加 AI、🤖 或任何模型标记。";
+const AI_MARK = "\u200B🤖";
+
+function markFinalAnswer<T extends { type: string; text?: string }>(content: T[]): T[] {
+  const first = content.findIndex(part => part.type === "text" && part.text?.trim());
+  if (first < 0) return content;
+  return content.map((part, index) => {
+    if (part.type !== "text" || part.text == null) return part;
+    const text = part.text.replace(/(^|\n)[ \t]*(?:\u200B)?(?:🤖|AI)[ \t]*(?=\n|$)/g, "$1").replace(/^\s+/, "");
+    return index === first ? { ...part, text: `${AI_MARK}\n${text}` } : { ...part, text };
+  });
+}
 
 function isRecovery(value: unknown): value is Recovery {
   return !!value && typeof value === "object" && (value as Partial<Recovery>).version === 2 && typeof (value as Partial<Recovery>).sourceId === "string";
@@ -182,7 +193,7 @@ export default function finalModel(pi: ExtensionAPI) {
         report(ctx, `最终模型未完成整理（${result.stopReason}${!hasText ? "，无正文" : ""}），已保留原答复。${result.errorMessage ? errorText(result.errorMessage) : ""} 日志：${logPath()}，请求：${requestId}`);
         return;
       }
-      content = result.content;
+      content = markFinalAnswer(result.content);
       lastError = undefined;
       claimed.add(sourceId);
     } catch (error) {
@@ -196,7 +207,7 @@ export default function finalModel(pi: ExtensionAPI) {
     return content ? { entries: [{ type: "context_edit" as const, targetId: sourceId, replacement: { content } }, { type: "custom" as const, customType: CLAIM, data: sourceId }] } : undefined;
   });
 
-  pi.registerCommand("final-model", {
+  pi.registerCommand("pi-final-model", {
     description: "设置",
     handler: async (_args, ctx) => { loadConfig(ctx); await settings.open(ctx); },
   });
