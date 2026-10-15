@@ -34,7 +34,7 @@ export function createSettings(pi: ExtensionAPI, host: SettingsHost) {
               workingModel: ctx.model?.name || ctx.model?.id || "当前模型",
               busy: !ctx.isIdle(), recovery: host.needsRecovery(), error: host.error() || null,
               models: ctx.modelRegistry.getAll()
-                .filter(model => model.api !== "pi-virtual" && !model.id.startsWith("group/") && ctx.modelRegistry.hasConfiguredAuth(model))
+                .filter(model => model.api !== "pi-virtual" && ctx.modelRegistry.hasConfiguredAuth(model))
                 .map(model => ({ value: modelName(model), name: model.name || model.id, provider: model.provider, id: model.id, contextWindow: model.contextWindow }))
                 .sort((a, b) =>
                   Number(b.provider === config.model?.provider) - Number(a.provider === config.model?.provider) ||
@@ -56,7 +56,7 @@ export function createSettings(pi: ExtensionAPI, host: SettingsHost) {
             }
             let model;
             try { model = input.model ? parseModel(input.model as string) : undefined; }
-            catch { throw new SettingsError("请选择具体模型。"); }
+            catch { throw new SettingsError("请选择最终答复模型。"); }
             // Turning off must still work if a previously configured model disappeared.
             const old = host.config();
             if (model && (input.enabled || !old.model || modelName(old.model) !== modelName(model))) {

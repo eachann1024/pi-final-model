@@ -12,9 +12,7 @@ export function parseModel(value: string): ModelRef {
   if (separator < 1 || separator === value.length - 1 || /\s/.test(value)) {
     throw new Error("模型格式应为 provider/model-id，model-id 可以包含 /。");
   }
-  const model = { provider: value.slice(0, separator), id: value.slice(separator + 1) };
-  if (model.id.startsWith("group/")) throw new Error("最终模型不能使用 Magpie 路由组，请选择具体模型。");
-  return model;
+  return { provider: value.slice(0, separator), id: value.slice(separator + 1) };
 }
 export const modelName = (model: ModelRef) => `${model.provider}/${model.id}`;
 export const sameModel = (a: ModelRef | undefined, b: ModelRef | undefined) =>

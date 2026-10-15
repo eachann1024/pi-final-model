@@ -81,7 +81,7 @@ function renderModels() {
     const title = document.createElement('strong');
     title.textContent = data.models.length ? '没有找到匹配的模型' : '还没有可用的模型';
     const detail = document.createElement('span');
-    detail.textContent = data.models.length ? '试试其他名称。' : '先在 Pi 中登记具体模型并配置认证，再重新打开设置。';
+    detail.textContent = data.models.length ? '试试其他名称。' : '先在 Pi 中登记模型或路由组合并配置认证，再重新打开设置。';
     empty.append(title, detail);
     container.append(empty);
   }
