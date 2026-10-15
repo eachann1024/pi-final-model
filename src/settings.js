@@ -39,7 +39,7 @@ async function request(method, body) {
   } catch { throw Error('连接已断开，请回到 Pi 重新打开设置。'); }
   if (response.status === 403 || response.status === 410) throw Error('设置链接已失效，请回到 Pi 重新打开设置。');
   const value = await response.json();
-  if (!response.ok) throw Error(value.error || '无法保存，请稍后重试。');
+  if (!response.ok) { const error = Error(value.error || '无法保存，请稍后重试。'); error.status = response.status; throw error; }
   return value;
 }
 function preview() {
@@ -99,7 +99,7 @@ function renderModels() {
     const input = document.createElement('input');
     input.type = 'radio'; input.name = 'final-model'; input.value = model.value;
     input.setAttribute('aria-label', model.name + ' · ' + model.provider);
-    input.onchange = () => { draft.model = model.value; change(); chooser(false); };
+    input.onchange = () => { if (!draft) return; draft.model = model.value; change(); chooser(false); };
     const copy = document.createElement('span');
     copy.className = 'model-copy';
     const name = document.createElement('span'); name.className = 'model-name'; name.textContent = model.name;
@@ -139,7 +139,7 @@ async function save() {
   try {
     while (dirty()) {
       if (draft.enabled && !draft.model) break;
-      const body = { ...draft };
+      const body = { ...draft, revision: data.revision };
       const currentRevision = revision;
       status('正在保存…');
       const next = await request('PUT', body);
@@ -154,6 +154,17 @@ async function save() {
     else status('选择模型后保存');
   } catch (error) {
     // A lost response does not prove the server failed to write.
+    if (error.status === 409) {
+      draft = undefined;
+      saved = undefined;
+      $('enabled').disabled = true;
+      $('model-open').disabled = true;
+      revision++;
+      failed = true;
+      status('设置已变化', 'error');
+      feedback(error.message + ' 点击重试重新加载。', true);
+      return;
+    }
     saved = undefined;
     failed = true;
     status('尚未保存', 'error');
@@ -178,7 +189,8 @@ async function load(silent = false) {
     $('model-open').disabled = false;
     if (modelsChanged) renderModels();
     else preview();
-    feedback(data.error, false, data.recovery);
+    feedback(data.catalog?.error || data.error, false, data.recovery);
+    $('refresh-models').title = data.catalog?.refreshedAt ? '最近刷新：' + new Date(data.catalog.refreshedAt).toLocaleString() : '从供应商刷新模型目录';
     status(data.busy ? '任务进行中' : '改动自动保存');
   } catch (error) {
     if (revision !== currentRevision || saving || dirty()) return;
@@ -187,7 +199,22 @@ async function load(silent = false) {
     feedback(error.message, true);
   } finally { loading = false; }
 }
-$('enabled').onchange = () => { draft.enabled = $('enabled').checked; change(); };
+$('refresh-models').onclick = async () => {
+  if (saving || loading || dirty()) return;
+  loading = true;
+  $('refresh-models').disabled = true;
+  try {
+    const next = await request('PUT', { action: 'refresh' });
+    data = next;
+    draft = { enabled: next.enabled, model: next.model };
+    saved = { ...draft };
+    renderModels();
+    feedback(next.catalog?.error || next.error);
+    status(next.catalog?.error ? '刷新失败' : '模型目录已刷新');
+  } catch (error) { feedback(error.message, true); }
+  finally { loading = false; $('refresh-models').disabled = false; }
+};
+$('enabled').onchange = () => { if (!draft) return; draft.enabled = $('enabled').checked; change(); };
 $('search').oninput = renderModels;
 $('model-open').onclick = () => chooser($('model-chooser').hidden);
 $('model-chooser').onkeydown = event => {

@@ -1,217 +1,268 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { Text } from "@earendil-works/pi-tui";
-import { errorText, logPath, writeLog } from "./log.ts";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { modelName, readConfig, sameModel, type Config, type ModelRef } from "./config.ts";
+import { convertToLlm, estimateTokens, SettingsManager, VERSION, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { errorKind, logPath, writeLog } from "./log.ts";
+import { configRevision, modelName, readConfig, sameModel, type Config } from "./config.ts";
 import { createSettings } from "./settings.ts";
+import { applied, CLAIM, contentHash, durableBranch, isLegacyMark, isReceipt, LEGACY_MARK, PREPARED, verified, type Receipt } from "./receipt.ts";
 
-type Thinking = ReturnType<ExtensionAPI["getThinkingLevel"]>;
-interface Recovery {
-  version: 2;
-  sourceId: string;
-}
-const STATE = "pi-final-model/recovery";
-const CLAIM = "pi-final-model/claim";
-const TOOLS = "pi-final-model/restored-tools";
 const STATUS = "pi-final-model";
-const FINAL_INSTRUCTION = "请根据上面的用户需求、实际执行过程和工具结果，直接输出给用户的最终答复。遵循用户要求的语言、长度和格式；区分已完成、未验证和受阻事项，不虚构验证、提交或发布结果。若仍需用户决定或提供信息，保留必要问题。不要继续执行任务、调用工具、提及内部换模型过程，也不要声称整个任务一定已完成。不要在答复开头添加 AI、🤖 或任何模型标记。";
-const MARK = "pi-final-model/mark";
+const INSTRUCTION = "请根据用户需求、实际执行过程和工具结果，重写上一条助手最终答复，直接回答原始用户任务。遵循用户要求的语言、长度和格式，保留必要的确认问题；区分已完成、未验证和受阻事项，不虚构验证、提交或发布结果。不要继续执行任务、调用工具、询问下一项任务、提及换模型或添加模型标记。";
 const sparkle = "\x1b[38;2;236;196;227m✦\x1b[38;2;185;220;243m✦\x1b[38;2;201;185;240m✦\x1b[0m";
+const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const locksKey = Symbol.for("pi-final-model.requests.v3");
+const globals = globalThis as unknown as Record<symbol, Map<string, symbol>>;
+const locks = globals[locksKey] ??= new Map();
+const attemptsKey = Symbol.for("pi-final-model.attempts.v3");
+const attempts = globals[attemptsKey] ??= new Map();
 
-function stripFakeMarks<T extends { type: string; text?: string }>(content: T[]): T[] {
-  return content.map(part => part.type === "text" && part.text != null
-    ? { ...part, text: part.text.replace(/(^|\n)[ \t]*(?:\u200B)?(?:🤖|AI)[ \t]*(?=\n|$)/g, "$1").replace(/^\s+/, "") }
-    : part);
+function bounded<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason ?? new Error("Aborted"));
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
-
-function isRecovery(value: unknown): value is Recovery {
-  return !!value && typeof value === "object" && (value as Partial<Recovery>).version === 2 && typeof (value as Partial<Recovery>).sourceId === "string";
+function cleanText(content: { type: string; text?: string }[]) {
+  // Only strip decorative leading marks, preserving legitimate AI headings in the answer.
+  const text = content.filter(part => part.type === "text").map(part => part.text ?? "").join("\n")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/^(?:[\s\u200b]*(?:🤖|✦+|✨)[ \t]*(?:\n|$))+/, "").trim();
+  return text && !/^(?:AI|🤖|✦+|✨)$/i.test(text) ? [{ type: "text" as const, text }] : [];
 }
 
 export default function finalModel(pi: ExtensionAPI) {
-  // Child agents own their model and final output contract.
-  if (process.env.PI_SUBAGENT_CHILD === "1") return;
+  if (process.env.PI_SUBAGENT_CHILD === "1" || process.env.PI_FINAL_MODEL_DISABLED === "1") return;
+  if (typeof pi.registerEntryRenderer !== "function" || Number(VERSION.split(".")[0]) < 1 || (VERSION.startsWith("1.") && Number(VERSION.split(".")[1]) < 2)) {
+    process.stderr.write("[pi-final-model] 需要 Pi 1.2.0 或更新版本，插件已停用。\n"); return;
+  }
+  const owner = Symbol();
   let config: Config = { enabled: false };
-  let active: Recovery | undefined;
+  let seenConfig = false;
   let armed = false;
-  let rewriting = false;
-  let restoring: Promise<boolean> | undefined;
+  let generation = 0;
+  let current: ExtensionContext | undefined;
+  let active: { model: string; controller: AbortController; key: string } | undefined;
   let lastError: string | undefined;
-  let outcome: "completed" | "aborted" | "error" | undefined;
-  const claimed = new Set<string>();
+  let refreshed = 0;
+  let catalogError: string | undefined;
+  const reported = new Set<string>();
+  const accounted = new Set<string>();
 
+  function log(ctx: ExtensionContext, event: string, data: Record<string, unknown> = {}) {
+    writeLog(event, { extensionVersion: manifest.version, sourceCommit: manifest.piRelease?.source, piVersion: VERSION, sessionId: ctx.sessionManager.getSessionId(), ...data });
+  }
+  function status(ctx: ExtensionContext) {
+    if (ctx.hasUI) ctx.ui.setStatus(STATUS, active ? `最终整理中 · ${active.model}` : lastError ? "最终模型 · 需处理（/pi-final-model）" : config.enabled && config.model ? `最终模型 · ${modelName(config.model)}` : undefined);
+  }
+  function report(ctx: ExtensionContext, reason: string, message: string) {
+    lastError = message;
+    log(ctx, "warning", { reason });
+    if (!reported.has(reason + message)) {
+      reported.add(reason + message);
+      if (ctx.hasUI) ctx.ui.notify(`最终模型：${message}`, "warning");
+      else process.stderr.write(`[pi-final-model] ${message}\n`);
+    }
+    status(ctx);
+  }
+  function load(ctx: ExtensionContext) {
+    try {
+      const next = readConfig();
+      if (next.revision === "missing" && seenConfig) report(ctx, "config_missing", "配置文件已丢失，本轮保留原答复；请打开设置重新配置。");
+      if (next.revision !== "missing") seenConfig = true;
+      config = next;
+    } catch {
+      config = { ...config, enabled: false };
+      report(ctx, "config_invalid", "配置无法读取或格式无效，已停用；原文件未覆盖，请修复后重新打开设置。");
+    }
+    status(ctx);
+  }
+  function release() {
+    if (active && locks.get(active.key) === owner) locks.delete(active.key);
+    active = undefined;
+  }
+  function settle(ctx: ExtensionContext) {
+    try {
+      const branch = durableBranch(ctx);
+      for (const entry of branch) {
+        if (entry.type !== "custom" || entry.customType !== PREPARED || !isReceipt(entry.data)) continue;
+        const receipt = entry.data;
+        if (accounted.has(receipt.requestId)) continue;
+        if (!applied(receipt, branch)) {
+          accounted.add(receipt.requestId);
+          log(ctx, "not_applied", { requestId: receipt.requestId, sourceId: receipt.sourceId, reason: "edit_missing_or_superseded" });
+          continue;
+        }
+        if (!verified(receipt, branch)) pi.appendEntry(CLAIM, receipt);
+        if (!verified(receipt, durableBranch(ctx))) throw new Error("Receipt not durable");
+        accounted.add(receipt.requestId);
+        log(ctx, "applied", { requestId: receipt.requestId, sourceId: receipt.sourceId, model: receipt.model });
+        pi.events.emit("pi-final-model:applied", receipt);
+        lastError = undefined;
+      }
+    } catch { report(ctx, "persistence", "无法确认整理结果已保存，暂不显示成功标记；请检查会话文件权限和磁盘空间。"); }
+    finally { release(); status(ctx); }
+  }
   const settings = createSettings(pi, {
     config: () => config,
-    apply: (next, ctx, clearError) => { config = next; if (clearError) lastError = undefined; status(ctx); },
+    apply: (next, ctx, clearError) => { config = next; if (clearError) { lastError = undefined; reported.clear(); } status(ctx); },
     error: () => lastError,
-    needsRecovery: () => !!active,
-    recover: async ctx => {
-      const restored = await restore(ctx);
-      if (restored) lastError = undefined;
-      return restored;
-    },
+    needsRecovery: () => false,
+    recover: async ctx => { settle(ctx); return !lastError; },
+    catalog: () => ({ refreshedAt: refreshed || null, error: catalogError ?? null }),
+    refresh: async ctx => refresh(ctx, config.model?.provider),
   });
-
-  function status(ctx: ExtensionContext) {
-    if (ctx.hasUI) ctx.ui.setStatus(STATUS, active ? `最终输出 · ${modelName(config.model!)}` :
-      config.enabled && config.model ? `最终模型 · ${modelName(config.model)}` : undefined);
-  }
-  function report(ctx: ExtensionContext, message: string) {
-    lastError = message;
-    writeLog("warning", { sessionId: ctx.sessionManager.getSessionId(), message: errorText(message) });
-    if (ctx.hasUI) ctx.ui.notify(`最终模型：${message}`, "warning");
-    else process.stderr.write(`[pi-final-model] ${message}\n`);
-  }
-  function loadConfig(ctx: ExtensionContext) {
+  async function refresh(ctx: ExtensionContext, provider?: string) {
+    if (process.env.PI_OFFLINE === "1") return;
+    const signal = AbortSignal.any([AbortSignal.timeout(10_000), ...(ctx.signal ? [ctx.signal] : [])]);
+    refreshed = Date.now();
     try {
-      config = readConfig();
-    } catch (error) {
-      config = { enabled: false };
-      report(ctx, `配置无效，已停用：${String(error)}`);
-    }
-    status(ctx);
+      const result = await bounded(ctx.modelRegistry.refresh({ allowNetwork: true, force: true, providers: provider ? [provider] : undefined, signal }), signal);
+      catalogError = result.errors.size || result.aborted ? "模型目录刷新失败，请稍后重试。" : undefined;
+      log(ctx, "catalog_refresh", { reason: catalogError ? "failed" : "completed" });
+    } catch { catalogError = "模型目录刷新失败，请稍后重试。"; log(ctx, "catalog_refresh", { reason: "timeout_or_error" }); }
   }
-  function saveRecovery(state: Recovery | null) {
-    pi.appendEntry(STATE, state && { version: 2, sourceId: state.sourceId });
+  function reset(ctx: ExtensionContext) {
+    active?.controller.abort(); release(); generation++; armed = false; current = ctx; accounted.clear(); reported.clear();
+    settings.close(); load(ctx); settle(ctx);
+    log(ctx, "loaded");
   }
-
-  async function restore(ctx: ExtensionContext): Promise<boolean> {
-    if (restoring) return restoring;
-    const state = active;
-    if (!state) return true;
-    restoring = (async () => {
-      try {
-        // A manual model change takes precedence over the saved selection.
-        saveRecovery(null);
-        active = undefined;
-        return true;
-      } catch (error) {
-        report(ctx, `恢复最终整理状态失败：${String(error)}`);
-        return false;
-      } finally {
-        status(ctx);
-      }
-    })();
-    try { return await restoring; }
-    finally { restoring = undefined; }
-  }
-
-  async function recoverBranch(ctx: ExtensionContext) {
-    active = undefined;
-    armed = false;
-    outcome = undefined;
-    claimed.clear();
-    let recovery: Recovery | undefined;
-    let restoredTools: string[] | undefined;
-    for (const entry of ctx.sessionManager.getBranch()) {
-      if (entry.type === "message" && entry.message.role === "system") restoredTools = undefined;
-      if (entry.type !== "custom") continue;
-      if (entry.customType === TOOLS && Array.isArray(entry.data) && entry.data.every((name) => typeof name === "string")) restoredTools = entry.data;
-      if (entry.customType === STATE) recovery = isRecovery(entry.data) ? entry.data : undefined;
-      if (entry.customType === CLAIM && typeof entry.data === "string") claimed.add(entry.data);
-    }
-    if (restoredTools) pi.setActiveTools(restoredTools);
-    if (recovery) { active = recovery; await restore(ctx); }
-    loadConfig(ctx);
-  }
-  pi.on("session_start", async (_event, ctx) => { settings.close(); await recoverBranch(ctx); await settings.start(ctx); });
-  pi.on("session_tree", async (_event, ctx) => { settings.close(); await recoverBranch(ctx); });
-  pi.on("session_shutdown", async (_event, ctx) => { settings.close(); armed = false; await restore(ctx); });
-  pi.registerMessageRenderer(MARK, () => new Text(sparkle, 0, 0));
-
-  pi.on("before_agent_start", async (event, ctx) => {
-    outcome = undefined;
-    if (active && !(await restore(ctx))) { ctx.abort(); return; }
-    loadConfig(ctx);
-    armed = event.messageType === "user";
+  pi.registerEntryRenderer<Receipt>(CLAIM, entry => {
+    if (!current || !isReceipt(entry.data)) return undefined;
+    const receipt = entry.data;
+    return {
+      invalidate() {},
+      render(width) {
+        try { return current && verified(receipt, durableBranch(current)) ? new Text(sparkle, 0, 0).render(width) : []; }
+        catch { return []; }
+      },
+    };
   });
-
-  // A queued user message can start inside the same low-level loop.
-  pi.on("message_start", async (event, ctx) => {
-    if (event.message.role !== "user" || !active) return;
-    if (!(await restore(ctx))) { ctx.abort(); return; }
-    armed = true;
-    outcome = undefined;
+  // Never render legacy markers without trustworthy source/hash evidence.
+  pi.registerMessageRenderer(LEGACY_MARK, () => new Text("", 0, 0));
+  pi.on("context", event => ({ messages: event.messages.filter(message => !isLegacyMark(message)) }));
+  pi.on("session_before_compact", event => {
+    event.preparation.messagesToSummarize = event.preparation.messagesToSummarize.filter(message => !isLegacyMark(message));
+    event.preparation.turnPrefixMessages = event.preparation.turnPrefixMessages.filter(message => !isLegacyMark(message));
   });
-  pi.on("agent_before_settle", (event) => { outcome = event.outcome; });
+  pi.on("session_before_tree", event => {
+    event.preparation.entriesToSummarize = event.preparation.entriesToSummarize.filter(entry => !(entry.type === "custom_message" && entry.customType === LEGACY_MARK));
+  });
+  pi.on("session_start", async (_event, ctx) => { reset(ctx); await settings.start(ctx); });
+  pi.on("session_tree", (_event, ctx) => reset(ctx));
+  pi.on("session_shutdown", (_event, ctx) => { active?.controller.abort(); release(); generation++; settings.close(); log(ctx, "shutdown"); });
+  pi.on("before_agent_start", (event, ctx) => { current = ctx; settle(ctx); load(ctx); armed = event.messageType === "user"; });
+  pi.on("message_start", event => { if (event.message.role === "user") armed = true; });
+  pi.on("agent_settled", (_event, ctx) => settle(ctx));
 
-  // Rewrite only the finalized assistant message. No user message is added,
-  // and the working model remains selected for the next task.
   pi.on("agent_before_settle", async (event, ctx) => {
-    const source = [...event.context.contextEntries].reverse().find((entry) => entry.sourceEntry.type === "message" && entry.sourceEntry.message.role === "assistant");
-    if (rewriting || !source || source.sourceEntry.type !== "message" || source.sourceEntry.message.role !== "assistant" || source.sourceEntry.message.stopReason !== "stop" || !armed || event.outcome !== "completed" ||
-      !config.enabled || !config.model || !ctx.model || ctx.hasPendingMessages() || claimed.has(source.sourceEntry.id)) return;
-    const target = ctx.modelRegistry.find(config.model.provider, config.model.id);
-    if (!target) { report(ctx, `找不到最终模型 ${modelName(config.model)}，保留原答复。`); return; }
-    if (target.api === "pi-virtual") { report(ctx, "最终模型不能使用虚拟路由模型，保留原答复。"); return; }
-    if (sameModel(ctx.model, target)) return;
-    if (!ctx.modelRegistry.hasConfiguredAuth(target)) { report(ctx, `最终模型认证未配置：${modelName(target)}，保留原答复。`); return; }
-    const usage = ctx.getContextUsage();
-    const required = usage?.tokens;
-    const reserve = Math.min(target.maxTokens || 8192, 16384) + 2048;
-    if (!target.contextWindow || required == null || required + reserve >= target.contextWindow) {
-      report(ctx, "无法确认最终模型能容纳当前上下文，已跳过；请压缩后继续，或选择更大上下文的模型。");
-      return;
-    }
-    const sourceId = source.sourceEntry.id;
-    const state: Recovery = { version: 2, sourceId };
-    active = state;
-    saveRecovery(state);
+    current = ctx;
+    const prior = event.entries;
+    const legacy = event.context.contextEntries.filter(entry => entry.sourceEntry.type === "custom_message" && entry.sourceEntry.customType === LEGACY_MARK && entry.messages.length)
+      .map(entry => ({ type: "context_edit" as const, targetId: entry.sourceEntry.id, replacement: null }));
+    const baseline = [...prior, ...legacy];
+    const source = [...event.context.contextEntries].reverse().find(entry => entry.sourceEntry.type === "message" && entry.sourceEntry.message.role === "assistant");
+    const sourceId = source?.sourceEntry.id;
+    const skip = (reason: string, message?: string) => {
+      log(ctx, "skip", { reason, sourceId });
+      if (message) report(ctx, reason, message);
+      return baseline.length !== prior.length ? { entries: baseline } : undefined;
+    };
+    if (!source || source.sourceEntry.type !== "message" || source.sourceEntry.message.role !== "assistant") return skip("no_assistant");
+    if (!armed) return skip("custom_turn");
+    if (event.outcome !== "completed" || source.sourceEntry.message.stopReason !== "stop") return skip("incomplete_turn");
+    load(ctx);
+    if (!config.enabled || !config.model) return skip("disabled");
+    if (!ctx.model) return skip("working_model_missing");
+    if (ctx.hasPendingMessages() || event.continue) return skip("pending_messages");
+    if (prior.some(entry => entry.type === "context_edit" && entry.targetId === sourceId)) return skip("edit_conflict");
+    const branch = ctx.sessionManager.getBranch();
+    if (branch.some(entry => entry.type === "custom" && ((entry.customType === CLAIM && entry.data === sourceId) || (entry.customType === PREPARED && isReceipt(entry.data) && entry.data.sourceId === sourceId)))) return skip("already_attempted");
+    const key = `${ctx.sessionManager.getSessionId()}:${sourceId}`;
+    if (locks.has(key) || attempts.has(key) || prior.some(entry => entry.type === "custom" && entry.customType === PREPARED && isReceipt(entry.data) && entry.data.sourceId === sourceId)) return skip("duplicate_instance");
+    const selected = { ...config.model };
+    const revision = config.revision;
+    const runGeneration = generation;
+    let leaf = ctx.sessionManager.getLeafId();
+    const sessionId = ctx.sessionManager.getSessionId();
+    const controller = new AbortController();
+    locks.set(key, owner);
+    active = { key, model: modelName(selected), controller };
     status(ctx);
-    const transcript = event.context.llmMessages;
-    let content: typeof source.sourceEntry.message.content | undefined;
-    const reasoning = pi.getThinkingLevel();
-    const streamOptions = reasoning === "off" ? { signal: ctx.signal } : { signal: ctx.signal, reasoning };
-    rewriting = true;
-    const requestId = randomUUID();
+    let handedOff = false;
+    let requestId: string | undefined;
     const started = Date.now();
-    const logContext = { requestId, sessionId: ctx.sessionManager.getSessionId(), sourceId, model: modelName(target), reasoning };
-    writeLog("request", { ...logContext, contextTokens: required, messageCount: transcript.length });
     try {
-      const stream = ctx.modelRegistry.streamSimple(target, {
-        messages: [
-          { role: "system", content: `${ctx.getSystemPrompt()}\n\n本轮仅整理最终答复，禁止调用任何工具或开始新的工作。${FINAL_INSTRUCTION}`, toolsAdded: [], timestamp: Date.now() },
-          // Historical system messages carry toolsAdded; tools: [] does not remove them.
-          // The effective prompt above replaces them while preserving all task evidence.
-          ...transcript.filter(message => message.role !== "system"),
-          // Request-local instruction: never appended to the user's session.
-          { role: "user", content: `请现在重写上一条助手最终答复，作为对原始用户任务的回答。${FINAL_INSTRUCTION} 不要询问下一项任务。`, timestamp: Date.now() },
-        ],
-        tools: [],
-      }, streamOptions);
-      const result = await stream.result();
-      const hasText = result.content.some(part => part.type === "text" && part.text.trim());
-      writeLog("response", {
-        ...logContext, durationMs: Date.now() - started, stopReason: result.stopReason,
-        rawStopReason: result.rawStopReason, responseId: result.responseId, responseModel: result.responseModel,
-        success: result.stopReason === "stop" && hasText, usage: result.usage,
-        content: result.content.map(part => ({ type: part.type, characters: part.type === "text" ? part.text.length : part.type === "thinking" ? part.thinking.length : undefined, tool: part.type === "toolCall" ? part.name : undefined })),
-        error: result.errorMessage ? errorText(result.errorMessage) : undefined,
-      });
-      if (result.stopReason !== "stop" || !hasText) {
-        report(ctx, `最终模型未完成整理（${result.stopReason}${!hasText ? "，无正文" : ""}），已保留原答复。${result.errorMessage ? errorText(result.errorMessage) : ""} 日志：${logPath()}，请求：${requestId}`);
-        return;
+      let target = ctx.modelRegistry.find(selected.provider, selected.id);
+      if (!target && Date.now() - refreshed > 60_000) { await refresh(ctx, selected.provider); target = ctx.modelRegistry.find(selected.provider, selected.id); }
+      if (!target) return skip("model_missing", `找不到 ${modelName(selected)}，已保留原答复；请在 /pi-final-model 重新选择或刷新目录。`);
+      if (target.api === "pi-virtual" || target.id.startsWith("group/")) return skip("virtual_model", "请在设置中选择具体模型。");
+      if (sameModel(ctx.model, target)) return skip("same_model");
+      if (!ctx.modelRegistry.hasConfiguredAuth(target)) return skip("auth_missing", "最终模型未配置认证，请使用 /login 后重试。");
+      const transcript = convertToLlm(event.context.contextMessages.filter(message => !isLegacyMark(message)));
+      const latestUser = [...transcript].reverse().find(message => message.role === "user");
+      const latestUserText = typeof latestUser?.content === "string" ? latestUser.content : latestUser?.content.filter(part => part.type === "text").map(part => part.text).join("\n") ?? "";
+      const answer = source.messages.find(message => message.role === "assistant");
+      const answerText = answer && Array.isArray(answer.content) ? answer.content.filter(part => part.type === "text").map(part => part.text).join("\n") : "";
+      const messages = [
+        { role: "system" as const, content: `${ctx.getSystemPrompt()}\n\n本轮只整理最终答复，禁止调用工具。${INSTRUCTION}`, toolsAdded: [], timestamp: Date.now() },
+        ...transcript.filter(message => message.role !== "system"),
+        { role: "user" as const, content: `${INSTRUCTION}\n最新用户要求（优先于历史任务）：\n${latestUserText}\n\n本轮待整理答复：\n${answerText}\n\n只整理上面这条答复。用户指定原样回复、固定字符串、JSON 或代码格式时，必须原样保留满足格式的答复，不要回到历史任务。`, timestamp: Date.now() },
+      ];
+      if (!target.input.includes("image") && messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image"))) return skip("image_unsupported", "当前上下文包含图片，最终模型不支持图片；已保留原答复，请选择支持图片的模型。");
+      const maxTokens = Math.min(target.maxTokens || 8192, 16384);
+      const estimated = messages.reduce((total, message) => total + estimateTokens(message), 0);
+      const required = Math.max(estimated, ctx.getContextUsage()?.tokens ?? 0);
+      if (!Number.isFinite(target.contextWindow) || target.contextWindow <= 0 || required + maxTokens + 4096 >= target.contextWindow) return skip("context_capacity", "最终模型上下文不足或容量未知，已保留原答复；请先压缩或选择更大模型。");
+      const preferences = SettingsManager.inMemory(pi.getSettings());
+      const retry = preferences.getProviderRetrySettings();
+      const timeoutMs = Math.min(300_000, Math.max(1000, retry.timeoutMs ?? (preferences.getHttpIdleTimeoutMs() || 120_000)));
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs), ...(ctx.signal ? [ctx.signal] : [])]);
+      const valid = () => !signal.aborted && generation === runGeneration && ctx.sessionManager.getSessionId() === sessionId && ctx.sessionManager.getLeafId() === leaf && !ctx.hasPendingMessages() && configRevision() === revision;
+      if (!valid()) return skip("stale_before_request");
+      requestId = randomUUID();
+      attempts.set(key, owner);
+      if (attempts.size > 2000) attempts.delete(attempts.keys().next().value!);
+      const reasoning = pi.getThinkingLevel();
+      const logContext = { requestId, sourceId, model: modelName(target), reasoning };
+      log(ctx, "request", { ...logContext, contextTokens: required, messageCount: messages.length, timeoutMs, maxTokens, maxRetries: Math.min(retry.maxRetries ?? 1, 2) });
+      const result = await bounded(ctx.modelRegistry.streamSimple(target, { messages, tools: [] }, {
+        signal, maxTokens, timeoutMs, maxRetries: Math.max(0, Math.min(retry.maxRetries ?? 1, 2)), maxRetryDelayMs: Math.min(retry.maxRetryDelayMs || 10000, 10000),
+        ...(reasoning === "off" ? {} : { reasoning }),
+      }).result(), signal);
+      const content = cleanText(result.content);
+      const accepted = result.stopReason === "stop" && content.length > 0 && !result.content.some(part => part.type !== "text" && part.type !== "thinking");
+      log(ctx, "response_received", { ...logContext, durationMs: Date.now() - started, stopReason: result.stopReason, responseId: result.responseId, responseModel: result.responseModel, accepted, usage: result.usage, reason: result.errorMessage ? errorKind(result.errorMessage) : undefined });
+      const contextStillValid = valid();
+      if (generation === runGeneration && ctx.sessionManager.getSessionId() === sessionId) {
+        pi.appendEntry("pi-final-model/usage", { ...logContext, usage: result.usage });
+        leaf = ctx.sessionManager.getLeafId();
       }
-      content = stripFakeMarks(result.content);
-      lastError = undefined;
-      claimed.add(sourceId);
+      pi.events.emit("pi-final-model:usage", { ...logContext, usage: result.usage });
+      if (!contextStillValid) return skip(signal.aborted ? "cancelled_or_timeout" : "stale_after_response");
+      if (!accepted) {
+        const reason = result.errorMessage ? errorKind(result.errorMessage) : "invalid_response";
+        const action = reason === "authentication" ? "请使用 /login 更新认证。" : reason === "permission" ? "请确认账号拥有该模型权限，或重新选择模型。" : reason === "quota" ? "请检查供应商余额和额度。" : "详情见诊断日志。";
+        return skip(reason, `最终整理未得到完整有效正文，已保留原答复。${action}`);
+      }
+      if (result.responseModel && result.responseModel !== target.id) log(ctx, "model_identity", { ...logContext, responseModel: result.responseModel, reason: "response_name_differs" });
+      if (!valid()) return skip(signal.aborted ? "cancelled_or_timeout" : "stale_after_response");
+      const receipt: Receipt = { version: 3, requestId, sourceId: source.sourceEntry.id, sessionId, model: modelName(target), responseModel: result.responseModel, responseId: result.responseId, hash: contentHash(content), usage: result.usage };
+      // Persist the receipt before the edit; show the custom entry only when both survive validation and disk writes.
+      handedOff = true;
+      return { entries: [...baseline,
+        { type: "custom" as const, customType: PREPARED, data: receipt },
+        { type: "context_edit" as const, targetId: receipt.sourceId, replacement: { content } },
+        { type: "custom" as const, customType: CLAIM, data: receipt },
+      ] };
     } catch (error) {
-      writeLog("exception", { ...logContext, durationMs: Date.now() - started, aborted: ctx.signal?.aborted === true, error: errorText(error) });
-      if (ctx.signal?.aborted) return;
-      report(ctx, `最终整理失败，已保留原答复：${errorText(error)} 日志：${logPath()}，请求：${requestId}`);
-    } finally {
-      rewriting = false;
-      await restore(ctx);
-    }
-    return content ? { entries: [
-      { type: "custom_message" as const, customType: MARK, content: "最终模型已整理", display: true, details: { sourceId } },
-      { type: "context_edit" as const, targetId: sourceId, replacement: { content } },
-      { type: "custom" as const, customType: CLAIM, data: sourceId },
-    ] } : undefined;
+      const reason = ctx.signal?.aborted || controller.signal.aborted ? "cancelled" : errorKind(error);
+      log(ctx, "failed", { requestId, sourceId, reason, durationMs: Date.now() - started });
+      if (reason !== "cancelled") report(ctx, reason, `整理失败（${reason}），已保留原答复。日志：${logPath()}${requestId ? `；请求：${requestId}` : ""}`);
+      return baseline.length !== prior.length ? { entries: baseline } : undefined;
+    } finally { if (!handedOff) release(); status(ctx); }
   });
-
-  pi.registerCommand("pi-final-model", {
-    description: "设置",
-    handler: async (_args, ctx) => { loadConfig(ctx); await settings.open(ctx); },
-  });
+  pi.registerCommand("pi-final-model", { description: "设置", handler: async (_args, ctx) => { load(ctx); await settings.open(ctx); } });
 }
