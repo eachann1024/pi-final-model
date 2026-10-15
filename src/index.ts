@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { errorText, logPath, writeLog } from "./log.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { modelName, readConfig, sameModel, type Config, type ModelRef } from "./config.ts";
 import { createSettings } from "./settings.ts";
@@ -47,6 +49,7 @@ export default function finalModel(pi: ExtensionAPI) {
   }
   function report(ctx: ExtensionContext, message: string) {
     lastError = message;
+    writeLog("warning", { sessionId: ctx.sessionManager.getSessionId(), message: errorText(message) });
     if (ctx.hasUI) ctx.ui.notify(`最终模型：${message}`, "warning");
     else process.stderr.write(`[pi-final-model] ${message}\n`);
   }
@@ -150,24 +153,42 @@ export default function finalModel(pi: ExtensionAPI) {
     const reasoning = pi.getThinkingLevel();
     const streamOptions = reasoning === "off" ? { signal: ctx.signal } : { signal: ctx.signal, reasoning };
     rewriting = true;
+    const requestId = randomUUID();
+    const started = Date.now();
+    const logContext = { requestId, sessionId: ctx.sessionManager.getSessionId(), sourceId, model: modelName(target), reasoning };
+    writeLog("request", { ...logContext, contextTokens: required, messageCount: transcript.length });
     try {
       const stream = ctx.modelRegistry.streamSimple(target, {
         messages: [
           { role: "system", content: `${ctx.getSystemPrompt()}\n\n本轮仅整理最终答复，禁止调用任何工具或开始新的工作。${FINAL_INSTRUCTION}`, toolsAdded: [], timestamp: Date.now() },
-          ...transcript,
+          // Historical system messages carry toolsAdded; tools: [] does not remove them.
+          // The effective prompt above replaces them while preserving all task evidence.
+          ...transcript.filter(message => message.role !== "system"),
+          // Request-local instruction: never appended to the user's session.
+          { role: "user", content: `请现在重写上一条助手最终答复，作为对原始用户任务的回答。${FINAL_INSTRUCTION} 不要询问下一项任务。`, timestamp: Date.now() },
         ],
         tools: [],
       }, streamOptions);
       const result = await stream.result();
-      if (result.stopReason !== "stop" || !result.content.some((part) => part.type === "text" && part.text.trim())) {
-        report(ctx, `最终模型未完成整理，已保留原答复。${result.errorMessage ?? ""}`.trim());
+      const hasText = result.content.some(part => part.type === "text" && part.text.trim());
+      writeLog("response", {
+        ...logContext, durationMs: Date.now() - started, stopReason: result.stopReason,
+        rawStopReason: result.rawStopReason, responseId: result.responseId, responseModel: result.responseModel,
+        success: result.stopReason === "stop" && hasText, usage: result.usage,
+        content: result.content.map(part => ({ type: part.type, characters: part.type === "text" ? part.text.length : part.type === "thinking" ? part.thinking.length : undefined, tool: part.type === "toolCall" ? part.name : undefined })),
+        error: result.errorMessage ? errorText(result.errorMessage) : undefined,
+      });
+      if (result.stopReason !== "stop" || !hasText) {
+        report(ctx, `最终模型未完成整理（${result.stopReason}${!hasText ? "，无正文" : ""}），已保留原答复。${result.errorMessage ? errorText(result.errorMessage) : ""} 日志：${logPath()}，请求：${requestId}`);
         return;
       }
       content = result.content;
+      lastError = undefined;
       claimed.add(sourceId);
     } catch (error) {
+      writeLog("exception", { ...logContext, durationMs: Date.now() - started, aborted: ctx.signal?.aborted === true, error: errorText(error) });
       if (ctx.signal?.aborted) return;
-      report(ctx, `最终整理失败，已保留原答复：${error instanceof Error ? error.message : String(error)}`);
+      report(ctx, `最终整理失败，已保留原答复：${errorText(error)} 日志：${logPath()}，请求：${requestId}`);
     } finally {
       rewriting = false;
       await restore(ctx);
