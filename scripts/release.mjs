@@ -53,7 +53,7 @@ async function metadata() {
   if (!response) return null;
   const value = await response.json();
   if (!value?.versions || !value['dist-tags']?.latest || !value.versions[value['dist-tags'].latest]) throw Error('Invalid npm package metadata');
-  versionParts(value['dist-tags'].latest);
+  if (value['dist-tags'].latest !== '0.0.0-stage') versionParts(value['dist-tags'].latest);
   return value;
 }
 function api(path) {
@@ -103,7 +103,9 @@ function verifyAssets(release, files) {
 async function prepare() {
   const head = assertSource(), digest = fingerprint();
   const before = await metadata();
+  if (!before && await fetchRegistry(`${encodeURIComponent(manifest.name)}/latest`)) throw Error('npm package index is still propagating; retry preparation later without publishing');
   const latest = before?.versions[before['dist-tags'].latest];
+  if (latest?.version === '0.0.0-stage') throw Error('npm has a holding version; wait for processing or complete staged approval before another release');
   const repair = latest?.piRelease?.fingerprint === digest;
   const version = repair ? latest.version : nextVersion(before);
   const source = repair ? latest.piRelease.source : head;
@@ -167,10 +169,11 @@ async function publish() {
   if (api('commits/main')?.sha !== head) { console.log('main advanced; leave current releases intact.'); return; }
   verifyTag(plan);
   const before = await metadata();
-  const record = before?.versions[plan.version];
+  const recordResponse = before?.versions[plan.version] ? undefined : await fetchRegistry(`${encodeURIComponent(plan.name)}/${plan.version}`);
+  const record = before?.versions[plan.version] ?? (recordResponse ? await recordResponse.json() : undefined);
   if (record) {
     assertRecord(record, plan);
-    if (before['dist-tags'].latest !== plan.version) throw Error('A different npm latest exists; never move it backwards');
+    if (before && before['dist-tags'].latest !== plan.version) throw Error('A different npm latest exists; never move it backwards');
     console.log('npm version is already verified; only completing GitHub release.');
   } else {
     if (before && Object.keys(before.versions).filter(v => /^\d+\.\d+\.\d+$/.test(v)).some(v => compareVersions(v, plan.version) >= 0)) throw Error('Prepared version no longer exceeds every published stable version');
@@ -178,12 +181,13 @@ async function publish() {
     run('npm', ['publish', join(stage, plan.filename), '--access', 'public', '--tag', 'latest', '--ignore-scripts', `--registry=${registry}`], { stdio: 'inherit' });
   }
   let published;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 24; attempt++) {
     published = await metadata();
     if (published?.versions[plan.version]) break;
-    if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 10_000));
+    if (attempt < 23) await new Promise(resolve => setTimeout(resolve, 15_000));
   }
-  assertRecord(published?.versions[plan.version], plan);
+  if (!published?.versions[plan.version]) throw Error(`npm accepted ${plan.version}, but public metadata is still unavailable; wait and rerun to reconcile, do not republish`);
+  assertRecord(published.versions[plan.version], plan);
   if (published['dist-tags'].latest !== plan.version) throw Error('npm latest was not verified; do not republish');
   const tarball = new URL(published.versions[plan.version].dist.tarball);
   if (tarball.origin !== registry) throw Error('Unexpected tarball registry');

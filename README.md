@@ -65,7 +65,7 @@ pi install npm:@each1024/pi-final-model
 
 复用 `pi-mini-mode` 等项目的每日稳定版规则：北京时间 08:00 由 `.github/workflows/daily-stable.yml` 检查 `main`，GitHub 排队可能延后启动；发布输入没有变化则跳过。手动运行时 `publish=false` 只检查、打包，`publish=true` 才发布。
 
-流程先执行静态检查，再打包固定提交的源码与本地资源；发布任务只使用已校验的同一 tarball，依次发布 npm `latest`、核对下载内容和校验和、创建 GitHub 稳定版与标签。版本必须高于全部历史稳定版，末位持续递增；版本只写入发布包，源码版本作为基线。构建期间 `main` 前进则跳过发布；npm 已成功而 GitHub 未完成时，重跑只补齐发布记录，不重复发包。
+流程先执行静态检查，再打包固定提交的源码与本地资源；发布任务只使用已校验的同一 tarball，依次发布 npm `latest`、最多等待约 6 分钟核对下载内容和校验和、创建 GitHub 稳定版与标签。版本必须高于全部历史稳定版，末位持续递增；版本只写入发布包，源码版本作为基线。构建期间 `main` 前进则跳过发布；npm 已成功而 GitHub 未完成时，重跑只补齐发布记录，不重复发包。
 
 Pi [插件目录](https://pi.dev/packages) 从 npm 发现带 `pi-package` 关键词的包，没有第二次上传；收录刷新由 Pi 控制。发布不会自动更新用户已安装的插件。
 
