@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Text } from "@earendil-works/pi-tui";
 import { errorText, logPath, writeLog } from "./log.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { modelName, readConfig, sameModel, type Config, type ModelRef } from "./config.ts";
@@ -14,16 +15,13 @@ const CLAIM = "pi-final-model/claim";
 const TOOLS = "pi-final-model/restored-tools";
 const STATUS = "pi-final-model";
 const FINAL_INSTRUCTION = "请根据上面的用户需求、实际执行过程和工具结果，直接输出给用户的最终答复。遵循用户要求的语言、长度和格式；区分已完成、未验证和受阻事项，不虚构验证、提交或发布结果。若仍需用户决定或提供信息，保留必要问题。不要继续执行任务、调用工具、提及内部换模型过程，也不要声称整个任务一定已完成。不要在答复开头添加 AI、🤖 或任何模型标记。";
-const AI_MARK = "\u200B🤖";
+const MARK = "pi-final-model/mark";
+const sparkle = "\x1b[38;2;236;196;227m✦\x1b[38;2;185;220;243m✦\x1b[38;2;201;185;240m✦\x1b[0m";
 
-function markFinalAnswer<T extends { type: string; text?: string }>(content: T[]): T[] {
-  const first = content.findIndex(part => part.type === "text" && part.text?.trim());
-  if (first < 0) return content;
-  return content.map((part, index) => {
-    if (part.type !== "text" || part.text == null) return part;
-    const text = part.text.replace(/(^|\n)[ \t]*(?:\u200B)?(?:🤖|AI)[ \t]*(?=\n|$)/g, "$1").replace(/^\s+/, "");
-    return index === first ? { ...part, text: `${AI_MARK}\n${text}` } : { ...part, text };
-  });
+function stripFakeMarks<T extends { type: string; text?: string }>(content: T[]): T[] {
+  return content.map(part => part.type === "text" && part.text != null
+    ? { ...part, text: part.text.replace(/(^|\n)[ \t]*(?:\u200B)?(?:🤖|AI)[ \t]*(?=\n|$)/g, "$1").replace(/^\s+/, "") }
+    : part);
 }
 
 function isRecovery(value: unknown): value is Recovery {
@@ -119,6 +117,7 @@ export default function finalModel(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => { settings.close(); await recoverBranch(ctx); await settings.start(ctx); });
   pi.on("session_tree", async (_event, ctx) => { settings.close(); await recoverBranch(ctx); });
   pi.on("session_shutdown", async (_event, ctx) => { settings.close(); armed = false; await restore(ctx); });
+  pi.registerMessageRenderer(MARK, () => new Text(sparkle, 0, 0));
 
   pi.on("before_agent_start", async (event, ctx) => {
     outcome = undefined;
@@ -193,7 +192,7 @@ export default function finalModel(pi: ExtensionAPI) {
         report(ctx, `最终模型未完成整理（${result.stopReason}${!hasText ? "，无正文" : ""}），已保留原答复。${result.errorMessage ? errorText(result.errorMessage) : ""} 日志：${logPath()}，请求：${requestId}`);
         return;
       }
-      content = markFinalAnswer(result.content);
+      content = stripFakeMarks(result.content);
       lastError = undefined;
       claimed.add(sourceId);
     } catch (error) {
@@ -204,7 +203,11 @@ export default function finalModel(pi: ExtensionAPI) {
       rewriting = false;
       await restore(ctx);
     }
-    return content ? { entries: [{ type: "context_edit" as const, targetId: sourceId, replacement: { content } }, { type: "custom" as const, customType: CLAIM, data: sourceId }] } : undefined;
+    return content ? { entries: [
+      { type: "custom_message" as const, customType: MARK, content: "最终模型已整理", display: true, details: { sourceId } },
+      { type: "context_edit" as const, targetId: sourceId, replacement: { content } },
+      { type: "custom" as const, customType: CLAIM, data: sourceId },
+    ] } : undefined;
   });
 
   pi.registerCommand("pi-final-model", {
