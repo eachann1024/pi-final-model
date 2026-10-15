@@ -1,16 +1,16 @@
 # pi-final-model
 
-让 Pi 用工作模型执行任务，再由指定模型整理最终答复，完成后恢复工作模型、思考强度和工具。
+让 Pi 用工作模型执行任务，再由指定模型整理最终答复；工作模型、思考强度和工具保持原选择。
 
 ## 安装与设置
 
 要求 Node.js 22.19+、Pi 1.2.0。
 
 ```bash
-pi install /path/to/pi-final-model
+pi install npm:@each1024/pi-final-model
 ```
 
-已有会话执行 `/reload`。首次在交互式 Pi 中加载时自动打开设置网页；以后只有一个入口：
+已有会话执行 `/reload`。升级已安装版本使用 `pi update npm:@each1024/pi-final-model`，之后再执行 `/reload`；本地开发仍可通过 `pi install /path/to/pi-final-model` 加载，避免同时安装两份。首次在交互式 Pi 中加载时自动打开设置网页；以后只有一个入口：
 
 ```text
 /pi-final-model    设置
@@ -51,9 +51,9 @@ pi install /path/to/pi-final-model
 - 用户只看到一条最终助手答复；原模型的草稿内容被上下文编辑替换，不另起一条用户或助手消息。会话记录仍显示该答复由工作模型产生。
 - 每个正常用户轮次最多整理一次。A 报错、中断、输出截断、无助手答复或工具终止时不整理；其他扩展 custom message 单独启动的轮次也不触发。
 - B 未登记、认证未配置、上下文容量不确定或不足时保留 A 的答复。插件不丢弃工具证据，可先压缩上下文或换更大模型；容量仍以服务端实际限制为准。
-- B 错误或中断后不再次自动整理；网络重试沿用 Pi 设置。
+- B 错误或中断后不再次自动整理；独立整理请求目前未传入 Pi 的重试和超时设置，具体行为取决于供应商适配器。
 - 自定义网关别名需要用户确保直达具体模型。其他扩展改写模型、上下文或拦截 `[[FINAL]]` 可能影响最终整理。
-- 在已核对的 Pi 1.2.0 中，`agent_settled` 后发送的消息延后处理，A 与 B 各发出一次 settled；RPC/SDK 消费者应检查最后助手模型或等待完整 prompt/idle。
+- RPC/SDK 消费者应等待完整 prompt/idle，并处理 `context_edit`；答复模型字段仍是工作模型，不能据此判断是否整理成功。闪光标记使用 `custom_message`，目前其说明文字会进入后续上下文。
 
 ## 诊断日志
 
@@ -61,13 +61,25 @@ pi install /path/to/pi-final-model
 
 不记录提示词、答复正文、思考正文或工具参数；错误摘要截断并遮蔽常见凭据格式。日志文件以 `0600` 权限创建，达到 5 MiB 后轮转至 `.jsonl.1`，只保留一份旧文件。日志写入失败会在 stderr 提示，不阻断原答复。开始记录后没有对应响应记录，可能表示进程在请求期间退出。
 
+## 每日发布
+
+复用 `pi-mini-mode` 等项目的每日稳定版规则：北京时间 08:00 由 `.github/workflows/daily-stable.yml` 检查 `main`，GitHub 排队可能延后启动；发布输入没有变化则跳过。手动运行时 `publish=false` 只检查、打包，`publish=true` 才发布。
+
+流程先执行静态检查，再打包固定提交的源码与本地资源；发布任务只使用已校验的同一 tarball，依次发布 npm `latest`、核对下载内容和校验和、创建 GitHub 稳定版与标签。版本必须高于全部历史稳定版，末位持续递增；版本只写入发布包，源码版本作为基线。构建期间 `main` 前进则跳过发布；npm 已成功而 GitHub 未完成时，重跑只补齐发布记录，不重复发包。
+
+Pi [插件目录](https://pi.dev/packages) 从 npm 发现带 `pi-package` 关键词的包，没有第二次上传；收录刷新由 Pi 控制。发布不会自动更新用户已安装的插件。
+
+npm 认证优先使用配置给 `eachann1024/pi-final-model`、`daily-stable.yml` 的 Trusted Publisher；配置前使用仓库 Secret `NPM_TOKEN`。当前引导令牌有效期至 2026-12-08，需要此前完成 OIDC 配置或更新 Secret；私有 GitHub 仓库无法生成 npm provenance。凭据不进入源码和发布包。
+
+边界扫描与处理建议保存在源码仓库的 `BOUNDARY-REVIEW.md`；表中标注的遗漏尚未修复。
+
 ## 开发与卸载
 
 ```bash
 npm install --ignore-scripts
 npm run check
 npm run pack:check
-pi remove /path/to/pi-final-model
+pi remove npm:@each1024/pi-final-model
 ```
 
 `check` 检查 TypeScript 与前端脚本语法，不运行测试用例。卸载时建议保持空闲、恢复工作模型；配置文件保留。

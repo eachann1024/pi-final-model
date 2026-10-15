@@ -1,18 +1,23 @@
 {
-  "name": "pi-final-model",
+  "name": "@each1024/pi-final-model",
   "version": "0.2.0",
-  "description": "Use a dedicated model for the final response of a Pi task, then restore the working model.",
+  "description": "Rewrite Pi's final answer with a dedicated model, with settings, diagnostic logs, and a verified completion sparkle.",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package", "pi-extension", "magpie"],
+  "author": "eachann1024",
+  "repository": { "type": "git", "url": "git+https://github.com/eachann1024/pi-final-model.git" },
+  "homepage": "https://github.com/eachann1024/pi-final-model#readme",
+  "bugs": { "url": "https://github.com/eachann1024/pi-final-model/issues" },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
+  "keywords": ["pi-package", "pi-coding-agent", "pi-extension", "magpie"],
   "files": ["src", "README.md", "LICENSE"],
   "pi": { "extensions": ["./src/index.ts"] },
   "engines": { "node": ">=22.19.0" },
-  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*" },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.2.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.0"
   },
-  "scripts": { "check": "tsc --noEmit && node --check src/settings.js", "pack:check": "npm pack --dry-run" }
+  "scripts": { "check": "tsc --noEmit && node --check src/settings.js && node --check scripts/release.mjs", "pack:check": "npm pack --dry-run" }
 }

@@ -1,0 +1,82 @@
+name: Daily stable npm release
+
+on:
+  schedule:
+    # Same schedule as pi-mini-mode: 08:00 Asia/Shanghai; unchanged inputs are skipped.
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish to npm and GitHub after successful checks
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-stable-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      release: ${{ steps.prepare.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - name: Prepare immutable npm package
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release.mjs prepare
+      - uses: actions/upload-artifact@v4
+        if: steps.prepare.outputs.release == 'true'
+        with:
+          name: stable-${{ github.sha }}
+          path: .release/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: needs.build.outputs.release == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || inputs.publish == true)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11 --registry=https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-${{ github.sha }}
+          path: .release/
+      - name: Publish verified package and stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PUBLISH_ALLOWED: 'true'
+        run: node scripts/release.mjs publish
