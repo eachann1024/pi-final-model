@@ -2,7 +2,7 @@ name: Daily stable npm release
 
 on:
   schedule:
-    # Same schedule as pi-mini-mode: 08:00 Asia/Shanghai; unchanged inputs are skipped.
+    # Same schedule as pi-mini-mode: 08:00 Asia/Shanghai; skipped until package.json is bumped past npm latest.
     - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
@@ -35,10 +35,19 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Skip when package.json version is not newer than npm latest
+        id: gate
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release.mjs gate
       - run: npm ci --ignore-scripts
+        if: steps.gate.outputs.proceed != 'false'
       - run: npm run check
+        if: steps.gate.outputs.proceed != 'false'
       - name: Prepare immutable npm package
         id: prepare
+        if: steps.gate.outputs.proceed != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release.mjs prepare

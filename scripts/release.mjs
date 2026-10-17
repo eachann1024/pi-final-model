@@ -212,6 +212,20 @@ async function publish() {
   console.log(`Verified ${plan.name}@${plan.version}: npm latest, tarball integrity, GitHub tag and release. Pi installs the same npm package.`);
 }
 
+// Cheap pre-check before install/check: skip the daily run until package.json is bumped past npm latest.
+async function gate() {
+  const before = await metadata();
+  const latest = before?.['dist-tags'].latest;
+  if (!latest || latest === '0.0.0-stage') { output('proceed', 'true'); return; }
+  const release = releaseForTag(`v${latest}`);
+  if (compareVersions(manifest.version, latest) <= 0 && release && !release.draft) {
+    console.log(`package.json ${manifest.version} is not newer than published ${manifest.name}@${latest}; bump the version to release again.`);
+    output('proceed', 'false');
+    return;
+  }
+  output('proceed', 'true');
+}
+
 const command = process.argv[2];
-if (process.argv.length !== 3 || !['prepare', 'publish'].includes(command)) throw Error('Usage: node scripts/release.mjs prepare|publish');
-await (command === 'prepare' ? prepare() : publish());
+if (process.argv.length !== 3 || !['gate', 'prepare', 'publish'].includes(command)) throw Error('Usage: node scripts/release.mjs gate|prepare|publish');
+await ({ gate, prepare, publish })[command]();
