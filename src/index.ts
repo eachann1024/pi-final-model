@@ -96,7 +96,6 @@ export default function finalModel(pi: ExtensionAPI) {
           continue;
         }
         if (!branch.some(entry => entry.type === "custom" && entry.customType === CLAIM && isReceipt(entry.data) && entry.data.requestId === receipt.requestId)) pi.appendEntry(CLAIM, receipt);
-        if (!branch.some(entry => entry.type === "custom" && entry.customType === CLAIM_END && isReceipt(entry.data) && entry.data.requestId === receipt.requestId)) pi.appendEntry(CLAIM_END, receipt);
         if (!verified(receipt, durableBranch(ctx))) throw new Error("Receipt not durable");
         accounted.add(receipt.requestId);
         log(ctx, "applied", { requestId: receipt.requestId, sourceId: receipt.sourceId, model: receipt.model });
@@ -142,7 +141,8 @@ export default function finalModel(pi: ExtensionAPI) {
     };
   };
   pi.registerEntryRenderer<Receipt>(CLAIM, sparkleRenderer);
-  pi.registerEntryRenderer<Receipt>(CLAIM_END, sparkleRenderer);
+  // Custom entries are always appended after the answer, so a separate "before" mark cannot render above it. Older sessions still hold one; hide it.
+  pi.registerEntryRenderer<Receipt>(CLAIM_END, () => new Text("", 0, 0));
   // Never render legacy markers without trustworthy source/hash evidence.
   pi.registerMessageRenderer(LEGACY_MARK, () => new Text("", 0, 0));
   pi.on("context", event => ({ messages: event.messages.filter(message => !isLegacyMark(message)) }));
@@ -259,7 +259,6 @@ export default function finalModel(pi: ExtensionAPI) {
         { type: "custom" as const, customType: PREPARED, data: receipt },
         { type: "context_edit" as const, targetId: receipt.sourceId, replacement: { content } },
         { type: "custom" as const, customType: CLAIM, data: receipt },
-        { type: "custom" as const, customType: CLAIM_END, data: receipt },
       ] };
     } catch (error) {
       const reason = ctx.signal?.aborted || controller.signal.aborted ? "cancelled" : errorKind(error);
