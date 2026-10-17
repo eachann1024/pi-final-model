@@ -11,6 +11,7 @@ const STATUS = "pi-final-model";
 const INSTRUCTION = "请根据用户需求、实际执行过程和工具结果，重写上一条助手最终答复，直接回答原始用户任务。遵循用户要求的语言、长度和格式，保留必要的确认问题；区分已完成、未验证和受阻事项，不虚构验证、提交或发布结果。不要继续执行任务、调用工具、询问下一项任务、提及换模型或添加模型标记。";
 const sparkle = "\x1b[38;2;236;196;227m✦\x1b[38;2;185;220;243m✦\x1b[38;2;201;185;240m✦\x1b[0m";
 const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const REDRAW = "pi-final-model/redraw";
 const locksKey = Symbol.for("pi-final-model.requests.v3");
 const globals = globalThis as unknown as Record<symbol, Map<string, symbol>>;
 const locks = globals[locksKey] ??= new Map();
@@ -97,6 +98,7 @@ export default function finalModel(pi: ExtensionAPI) {
         }
         if (!branch.some(entry => entry.type === "custom" && entry.customType === CLAIM && isReceipt(entry.data) && entry.data.requestId === receipt.requestId)) pi.appendEntry(CLAIM, receipt);
         if (!verified(receipt, durableBranch(ctx))) throw new Error("Receipt not durable");
+        redraw(ctx);
         accounted.add(receipt.requestId);
         log(ctx, "applied", { requestId: receipt.requestId, sourceId: receipt.sourceId, model: receipt.model });
         pi.events.emit("pi-final-model:applied", receipt);
@@ -123,6 +125,14 @@ export default function finalModel(pi: ExtensionAPI) {
       catalogError = result.errors.size || result.aborted ? "模型目录刷新失败，请稍后重试。" : undefined;
       log(ctx, "catalog_refresh", { reason: catalogError ? "failed" : "completed" });
     } catch { catalogError = "模型目录刷新失败，请稍后重试。"; log(ctx, "catalog_refresh", { reason: "timeout_or_error" }); }
+  }
+  // The answer was drawn and cached before its receipt landed; invalidate once so the markdown transformer runs again.
+  function redraw(ctx: ExtensionContext) {
+    if (!ctx.hasUI) return;
+    try {
+      ctx.ui.setWidget(REDRAW, tui => { tui.invalidate(); return { render: () => [], invalidate() {} }; }, { placement: "belowEditor" });
+      ctx.ui.setWidget(REDRAW, undefined);
+    } catch { /* Rendering is cosmetic. */ }
   }
   function reset(ctx: ExtensionContext) {
     active?.controller.abort(); release(); generation++; armed = false; current = ctx; accounted.clear(); reported.clear();
