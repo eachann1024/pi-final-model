@@ -56,6 +56,22 @@ export function applied(receipt: Receipt, branch: SessionEntry[]): boolean {
 export function verified(receipt: Receipt, branch: SessionEntry[]): boolean {
   return applied(receipt, branch) && branch.some(entry => entry.type === "custom" && entry.customType === CLAIM && isReceipt(entry.data) && entry.data.requestId === receipt.requestId && entry.data.hash === receipt.hash);
 }
+export const textHash = (text: string) => contentHash([{ type: "text", text }]);
+// Hashes of answers whose rewrite is durable. Memoised by session file stamp so transcript rendering stays cheap.
+const hashCache = new Map<string, { stamp: string; hashes: Set<string> }>();
+export function verifiedHashes(ctx: ExtensionContext): Set<string> {
+  const branch = durableBranch(ctx);
+  const file = ctx.sessionManager.getSessionFile() ?? "memory";
+  let stamp = `${file}:${branch.length}`;
+  try { const stat = statSync(file); stamp = `${file}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${branch.length}`; } catch { /* Keep the branch-only stamp. */ }
+  const cached = hashCache.get(file);
+  if (cached?.stamp === stamp) return cached.hashes;
+  const hashes = new Set<string>();
+  for (const entry of branch) if (entry.type === "custom" && entry.customType === CLAIM && isReceipt(entry.data) && verified(entry.data, branch)) hashes.add(entry.data.hash);
+  hashCache.set(file, { stamp, hashes });
+  if (hashCache.size > 8) hashCache.delete(hashCache.keys().next().value!);
+  return hashes;
+}
 export function isLegacyMark(message: { role: string; customType?: string }): boolean {
   return message.role === "custom" && message.customType === LEGACY_MARK;
 }

@@ -28,7 +28,7 @@
 | 日志写失败、轮转、敏感数据 | 已处理 | 新请求错误只记分类码，不记错误正文；轮转锁防同时 rename，写日志失败只报分类并不阻断原答复。多进程 append 与异常掉电仍受文件系统约束。 |
 | 用量少算 | 部分完成：宿主 API 限制 | 成功或失败返回的 B usage 独立写入 `pi-final-model/usage` 并发出 `pi-final-model:usage` 事件；成功回执也保留用量。Pi 1.2.0 扩展 API 没有公开 appendUsage，内置总计暂不含该独立记录，不伪造工具消息或篡改 A 的 usage。 |
 | 模型伪造图形、误删 AI 标题 | 已处理 | 正式闪光由验证过的插件回执渲染；只去掉开头装饰图形，保留正文 AI 标题，纯 AI 标记不能替换正文。模型文本可画相似图形，字符外观本身不是证明。 |
-| TUI、RPC、print、HTML 展示差异 | 已处理，有宿主限制 | TUI 使用自定义记录渲染，RPC/SDK 应读取 context_edit、custom 回执并等待完整 prompt；提供 `pi-final-model:applied` 事件。print 只返回最终正文；HTML 是否渲染自定义记录由宿主决定。闪光作为独立完成记录，不承诺位于正文前。 |
+| TUI、RPC、print、HTML 展示差异 | 已处理，有宿主限制 | TUI 使用自定义记录渲染，RPC/SDK 应读取 context_edit、custom 回执并等待完整 prompt；提供 `pi-final-model:applied` 事件。print 只返回最终正文；HTML 是否渲染自定义记录由宿主决定。前置闪光依赖 TUI 的 markdown 变换，只在交互界面按哈希命中渲染，且内容完全相同的两条已整理答复会同时命中。 |
 | 未 reload、重复安装两份 | 已处理 | 日志记录运行版本与发布源码；同进程共享请求锁、尝试去重和边界 prepared 检测，续接按持久记录防重。已加载的旧版不会因发 npm 自动更新，仍须 update/reload；两个进程同时写同一会话不受支持。 |
 | 旧 Pi、未知子代理 | 已处理 | 启动检查 Pi ≥1.2 与 entry renderer；`PI_SUBAGENT_CHILD=1` 或显式 `PI_FINAL_MODEL_DISABLED=1` 禁用。未知第三方子代理需设置该禁用变量。 |
 | 续接、树导航、设置关闭 | 已处理 | 新上下文恢复持久回执，活动请求取消并释放锁；设置服务关闭和 generation 校验保留。 |
