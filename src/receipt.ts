@@ -67,7 +67,15 @@ export function verifiedHashes(ctx: ExtensionContext): Set<string> {
   const cached = hashCache.get(file);
   if (cached?.stamp === stamp) return cached.hashes;
   const hashes = new Set<string>();
-  for (const entry of branch) if (entry.type === "custom" && entry.customType === CLAIM && isReceipt(entry.data) && verified(entry.data, branch)) hashes.add(entry.data.hash);
+  for (const entry of branch) {
+    if (entry.type !== "custom" || entry.customType !== CLAIM || !isReceipt(entry.data) || !verified(entry.data, branch)) continue;
+    // The transcript still draws the original assistant message, so match its text blocks (and the rewrite, for hosts that draw the edit).
+    const receipt = entry.data;
+    hashes.add(receipt.hash);
+    const source = branch.find(item => item.id === receipt.sourceId);
+    if (source?.type === "message" && source.message.role === "assistant" && Array.isArray(source.message.content))
+      for (const part of source.message.content) if (part.type === "text" && part.text.trim()) hashes.add(textHash(part.text.trim()));
+  }
   hashCache.set(file, { stamp, hashes });
   if (hashCache.size > 8) hashCache.delete(hashCache.keys().next().value!);
   return hashes;
