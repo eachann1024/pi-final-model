@@ -62,15 +62,13 @@ pi install npm:@each1024/pi-final-model
 
 不记录提示词、答复正文、思考正文或工具参数；新请求失败只记录错误分类，不记录供应商错误全文。日志文件以 `0600` 权限创建，达到 5 MiB 后轮转至 `.jsonl.1`，只保留一份旧文件。日志写入失败会在 stderr 提示，不阻断原答复。开始记录后没有对应响应记录，可能表示进程在请求期间退出。
 
-## 每日发布
+## 自动发布
 
-复用 `pi-mini-mode` 等项目的每日稳定版规则：北京时间 08:00 由 `.github/workflows/daily-stable.yml` 检查 `main`，GitHub 排队可能延后启动；发布输入没有变化则跳过。手动运行时 `publish=false` 只检查、打包，`publish=true` 才发布。
-
-流程先执行静态检查，再打包固定提交的源码与本地资源；发布任务只使用已校验的同一 tarball，依次发布 npm `latest`、最多等待约 6 分钟核对下载内容和校验和、创建 GitHub 稳定版与标签。版本必须高于全部历史稳定版，末位持续递增；版本只写入发布包，源码版本作为基线。构建期间 `main` 前进则跳过发布；npm 已成功而 GitHub 未完成时，重跑只补齐发布记录，不重复发包。
+推到 `main`（含 PR 合并）且 `src/`、`package.json` 或 lockfile 有变化时，`.github/workflows/release.yml` 自动发布：package.json 版本高于 npm 已发布的最高版本就用它，否则在最高版本上末位 +1；发布 npm 后把版本号以 `[skip ci]` 提交回 `main`，并创建同名标签和 GitHub Release。只改文档或 CI 不发布；同一版本不会重复发布。
 
 Pi [插件目录](https://pi.dev/packages) 从 npm 发现带 `pi-package` 关键词的包，没有第二次上传；收录刷新由 Pi 控制。发布不会自动更新用户已安装的插件。
 
-npm 认证优先使用配置给 `eachann1024/pi-final-model`、`daily-stable.yml` 的 Trusted Publisher；配置前使用仓库 Secret `NPM_TOKEN`。当前引导令牌有效期至 2026-12-08，需要此前完成 OIDC 配置或更新 Secret；私有 GitHub 仓库无法生成 npm provenance。凭据不进入源码和发布包。
+npm 认证使用仓库 Secret `NPM_TOKEN`（当前令牌有效期至 2026-12-08），也可改为给 `release.yml` 配置 Trusted Publisher。凭据不进入源码和发布包。
 
 28 项边界跟进结果及宿主限制保存在源码仓库的 `BOUNDARY-REVIEW.md`。
 
