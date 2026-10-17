@@ -1,6 +1,6 @@
 {
   "name": "@each1024/pi-final-model",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Rewrite Pi's final answer with a dedicated model, with settings, diagnostic logs, and a verified completion sparkle.",
   "type": "module",
   "license": "MIT",
