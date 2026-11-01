@@ -9,9 +9,10 @@ export class SettingsError extends Error {
 /** A session-owned loopback bridge. Only the URL fragment holds the access token. */
 export async function startSettingsWeb(snapshot: () => unknown, update: (value: unknown) => Promise<void>) {
   const token = randomBytes(24).toString("hex");
-  const [page, script, manifest, icon] = await Promise.all([
+  const [page, script, translations, manifest, icon] = await Promise.all([
     readFile(new URL("./settings.html", import.meta.url), "utf8"),
     readFile(new URL("./settings.js", import.meta.url), "utf8"),
+    readFile(new URL("./settings-i18n.js", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("./icon.svg", import.meta.url), "utf8"),
   ]);
@@ -58,9 +59,9 @@ export async function startSettingsWeb(snapshot: () => unknown, update: (value: 
       res.setHeader("Content-Type", asset.type);
       res.end(asset.body); return;
     }
-    if (req.method === "GET" && (req.url === "/" || req.url === "/settings.js")) {
+    if (req.method === "GET" && (req.url === "/" || req.url === "/settings.js" || req.url === "/settings-i18n.js")) {
       res.setHeader("Content-Type", req.url === "/" ? "text/html; charset=utf-8" : "text/javascript; charset=utf-8");
-      res.end(req.url === "/" ? html : script); return;
+      res.end(req.url === "/" ? html : req.url === "/settings.js" ? script : translations); return;
     }
     if (req.url !== "/settings" || req.headers.authorization !== `Bearer ${token}`) {
       res.writeHead(403).end(); return;

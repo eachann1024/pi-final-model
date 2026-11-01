@@ -18,13 +18,17 @@ let failed = false;
 const equal = (a, b) => a?.enabled === b?.enabled && a?.model === b?.model;
 const dirty = () => draft && !equal(draft, saved);
 
+let statusText = '正在连接…';
+let feedbackText = '';
 function status(text, state = '') {
-  $('save-status').textContent = text;
+  statusText = text;
+  $('save-status').textContent = t(text);
   $('save-status').dataset.state = state;
 }
 function feedback(text, retry = false, recovery = false) {
+  feedbackText = text;
   $('feedback').hidden = !text;
-  $('message').textContent = text;
+  $('message').textContent = serverMessage(text) || '';
   $('retry').hidden = !retry;
   $('recover').hidden = !recovery;
 }
@@ -47,13 +51,20 @@ function preview() {
   $('enabled').checked = draft.enabled;
   $('enabled').disabled = !draft.model && !data.models.length;
   const selected = data.models.find(model => model.value === draft.model);
-  $('working-model').textContent = data.workingModel;
-  $('final-model').textContent = draft.enabled ? selected?.name || draft.model || '选择模型' : data.workingModel;
-  $('selected-name').textContent = selected?.name || draft.model || '选择模型';
+  // Dynamic values must survive a later language change.
+  $('selected-name').removeAttribute('data-i18n');
+  $('working-model').removeAttribute('data-i18n');
+  $('final-model').removeAttribute('data-i18n');
+  $('final-action').dataset.i18n = draft.enabled ? '整理答复' : '保留原答复';
+  const workingModel = data.workingModel === '当前模型' ? t('当前模型') : data.workingModel;
+  $('working-model').textContent = workingModel;
+  $('final-action').textContent = t(draft.enabled ? '整理答复' : '保留原答复');
+  $('final-model').textContent = draft.enabled ? selected?.name || draft.model || t('选择模型') : workingModel;
+  $('selected-name').textContent = selected?.name || draft.model || t('选择模型');
   $('selected-id').textContent = selected ? selected.provider + ' / ' + selected.id : '';
   $('selected-id').hidden = !selected;
   $('missing').hidden = !draft.model || !!selected;
-  $('missing').textContent = selected || !draft.model ? '' : '当前模型不可用，请重新选择：' + draft.model;
+  $('missing').textContent = selected || !draft.model ? '' : t('当前模型不可用，请重新选择：') + draft.model;
   for (const input of $('models').querySelectorAll('input')) {
     input.checked = input.value === draft.model;
     input.closest('.model-choice').classList.toggle('selected', input.checked);
@@ -79,9 +90,9 @@ function renderModels() {
     const empty = document.createElement('div');
     empty.className = 'empty';
     const title = document.createElement('strong');
-    title.textContent = data.models.length ? '没有找到匹配的模型' : '还没有可用的模型';
+    title.textContent = t(data.models.length ? '没有找到匹配的模型' : '还没有可用的模型');
     const detail = document.createElement('span');
-    detail.textContent = data.models.length ? '试试其他名称。' : '先在 Pi 中登记具体模型并配置认证，再重新打开设置。';
+    detail.textContent = t(data.models.length ? '试试其他名称。' : '先在 Pi 中登记具体模型并配置认证，再重新打开设置。');
     empty.append(title, detail);
     container.append(empty);
   }
@@ -107,7 +118,7 @@ function renderModels() {
     copy.append(name, id);
     const capacity = document.createElement('span'); capacity.className = 'capacity';
     capacity.textContent = model.contextWindow ? Math.round(model.contextWindow / 1000) + 'K' : '';
-    if (model.contextWindow) capacity.setAttribute('aria-label', '上下文 ' + capacity.textContent);
+    if (model.contextWindow) capacity.setAttribute('aria-label', t('上下文 ') + capacity.textContent);
     const check = document.createElement('img'); check.className = 'icon'; check.src = '/icons/check.svg'; check.alt = '';
     label.append(input, copy, capacity, check);
     container.append(label);
@@ -162,7 +173,7 @@ async function save() {
       revision++;
       failed = true;
       status('设置已变化', 'error');
-      feedback(error.message + ' 点击重试重新加载。', true);
+      feedback(error.message, true);
       return;
     }
     saved = undefined;
@@ -190,7 +201,7 @@ async function load(silent = false) {
     if (modelsChanged) renderModels();
     else preview();
     feedback(data.catalog?.error || data.error, false, data.recovery);
-    $('refresh-models').title = data.catalog?.refreshedAt ? '最近刷新：' + new Date(data.catalog.refreshedAt).toLocaleString() : '从供应商刷新模型目录';
+    refreshTitle();
     status(data.busy ? '任务进行中' : '改动自动保存');
   } catch (error) {
     if (revision !== currentRevision || saving || dirty()) return;
@@ -209,6 +220,7 @@ $('refresh-models').onclick = async () => {
     draft = { enabled: next.enabled, model: next.model };
     saved = { ...draft };
     renderModels();
+    refreshTitle();
     feedback(next.catalog?.error || next.error);
     status(next.catalog?.error ? '刷新失败' : '模型目录已刷新');
   } catch (error) { feedback(error.message, true); }
@@ -247,4 +259,20 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void load(true);
 });
 setInterval(() => { if (!document.hidden) void load(true); }, 5000);
+function refreshTitle() {
+  $('refresh-models').title = data?.catalog?.refreshedAt
+    ? t('最近刷新：') + new Date(data.catalog.refreshedAt).toLocaleString(language)
+    : t('从供应商刷新模型目录');
+}
+// Language changes only affect presentation: keep drafts, search, focus and in-flight requests intact.
+$('save-status').removeAttribute('data-i18n');
+for (const button of document.querySelectorAll('[data-language]')) button.onclick = () => {
+  language = button.dataset.language;
+  try { document.cookie = `pi-final-model-language=${language}; Path=/; Max-Age=31536000; SameSite=Strict`; } catch { /* Switching still works without persistence. */ }
+  translatePage();
+  status(statusText, $('save-status').dataset.state);
+  $('message').textContent = serverMessage(feedbackText) || '';
+  if (data && draft) renderModels();
+  refreshTitle();
+};
 void load();
