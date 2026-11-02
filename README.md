@@ -66,7 +66,7 @@ pi install npm:@each1024/pi-final-model
 
 ## 自动发布
 
-推到 `main`（含 PR 合并）且 `src/`、`package.json` 或 lockfile 有变化时，`.github/workflows/release.yml` 自动发布：package.json 版本高于 npm 已发布的最高版本就用它，否则在最高版本上末位 +1；发布 npm 后把版本号以 `[skip ci]` 提交回 `main`，并创建同名标签和 GitHub Release。只改文档或 CI 不发布；同一版本不会重复发布。
+推到 `main`（含 PR 合并）且 `src/`、`package.json` 或 lockfile 有变化时，`.github/workflows/release.yml` 自动发布：package.json 版本高于 npm 已发布的最高版本就用它，否则在最高版本上末位 +1；发布 npm 后把版本号以 `[skip ci]` 提交回 `main`，并创建同名 Git 标签用于追溯源码；不创建 GitHub Release 或上传附件。只改文档或 CI 不发布；同一版本不会重复发布。
 
 Pi [插件目录](https://pi.dev/packages) 从 npm 发现带 `pi-package` 关键词的包，没有第二次上传；收录刷新由 Pi 控制。发布不会自动更新用户已安装的插件。
 

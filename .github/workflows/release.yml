@@ -43,17 +43,6 @@ jobs:
       - name: Decide version
         id: plan
         run: node .github/scripts/pi-release.mjs
-      - name: Restore a missing GitHub Release for the published version
-        if: steps.plan.outputs.action == 'skip'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NAME: ${{ steps.plan.outputs.name }}
-          VERSION: ${{ steps.plan.outputs.version }}
-        run: |
-          if gh release view "v$VERSION" >/dev/null 2>&1; then exit 0; fi
-          mkdir -p "$RUNNER_TEMP/release"
-          npm pack "$NAME@$VERSION" --pack-destination "$RUNNER_TEMP/release"
-          gh release create "v$VERSION" "$RUNNER_TEMP"/release/*.tgz --verify-tag --title "v$VERSION" --generate-notes
       - run: npm install --global npm@11 --registry=https://registry.npmjs.org
         if: steps.plan.outputs.action == 'publish'
       - name: Prepare release commit
@@ -100,12 +89,3 @@ jobs:
             if ! git pull --rebase origin main; then git rebase --abort || true; break; fi
           done
           echo "::warning::npm 已发布 $VERSION（标签已建），但版本号回写 main 失败；下次发布会在最高版本上继续 +1，不会重复。"
-      - name: GitHub Release
-        if: steps.plan.outputs.action == 'publish'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NAME: ${{ steps.plan.outputs.name }}
-          VERSION: ${{ steps.plan.outputs.version }}
-        run: |
-          gh release create "v$VERSION" "$RUNNER_TEMP"/release/*.tgz --verify-tag --title "v$VERSION" --generate-notes \
-            --notes "npm: \`$NAME@$VERSION\` · 安装：\`pi install npm:$NAME\`"
