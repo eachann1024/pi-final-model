@@ -90,7 +90,7 @@ export default function finalModel(pi: ExtensionAPI) {
   let lastError: string | undefined;
   let refreshed = 0;
   let catalogError: string | undefined;
-  let activeUpdateBanner: { sessionId: string; version: string; collapsed: boolean } | undefined;
+  let activeUpdateBanner: { sessionId: string; version: string; previousVersion?: string; collapsed: boolean } | undefined;
   let removeBannerMount: (() => void) | undefined;
   const reported = new Set<string>();
   const accounted = new Set<string>();
@@ -203,7 +203,7 @@ export default function finalModel(pi: ExtensionAPI) {
             handleMouse(event: TuiMouseEvent) {
               if (!activeUpdateBanner || event.button !== "left" || event.shift || event.ctrl || event.alt || (event.clickCount ?? 1) !== 1) return;
               const inHeader = event.y >= 0 && event.y < lastHeaderRows;
-              const inFooter = lastTotalRows > lastHeaderRows && event.y >= lastTotalRows - 3 && event.y < lastTotalRows;
+              const inFooter = false;
               if ((inHeader || inFooter) && event.x >= 0 && event.x < lastWidth) {
                 if (event.type === "press") return { handled: true };
                 if (event.type === "click") {
@@ -218,7 +218,8 @@ export default function finalModel(pi: ExtensionAPI) {
               if (!activeUpdateBanner || activeUpdateBanner.sessionId !== ctx.sessionManager.getSessionId()) return [];
               const rendered = renderUpdateBanner(theme, width, {
                 version: activeUpdateBanner.version,
-                language: config.language ?? "zh-CN",
+                previousVersion: activeUpdateBanner.previousVersion,
+          language: config.language ?? (Intl.DateTimeFormat().resolvedOptions().locale.toLowerCase().startsWith("zh") ? "zh-CN" : "en"),
                 collapsed: activeUpdateBanner.collapsed,
               });
               lastHeaderRows = rendered.headerRows;
@@ -264,7 +265,7 @@ export default function finalModel(pi: ExtensionAPI) {
     }
     const hasMessages = ctx.sessionManager.getBranch().some(entry => entry.type === "message");
     if (exists && versionChanged && ctx.mode === "tui" && ctx.hasUI && !hasMessages) {
-      activeUpdateBanner = { sessionId, version: PACKAGE_VERSION, collapsed: false };
+      activeUpdateBanner = { sessionId, version: PACKAGE_VERSION, previousVersion: prevVersion, collapsed: false };
       mountUpdateBanner(ctx);
     }
   }
