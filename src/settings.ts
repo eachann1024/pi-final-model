@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ConfigConflict, modelName, parseModel, readConfig, saveConfig, type Config } from "./config.ts";
+import { ConfigConflict, DEFAULT_PROMPT, DEFAULT_PROMPTS, FIXED_PROMPT, FIXED_PROMPTS, isLanguage, isThinking, modelName, parseModel, PROMPT_LIMIT, readConfig, saveConfig, supportedThinking, validPrompt, type Config } from "./config.ts";
 import { SettingsError, startSettingsWeb } from "./settings-web.ts";
 
 interface SettingsHost {
@@ -37,11 +37,14 @@ export function createSettings(pi: ExtensionAPI, host: SettingsHost) {
             return {
               revision: config.revision, catalog: host.catalog(),
               enabled: config.enabled, model: config.model ? modelName(config.model) : null,
-              workingModel: ctx.model?.name || ctx.model?.id || "当前模型",
+              thinking: config.thinking ?? null, prompt: config.prompt ?? null, language: config.language ?? null,
+              defaultPrompt: DEFAULT_PROMPTS[config.language ?? "en"], defaultPrompts: DEFAULT_PROMPTS,
+              fixedPrompt: FIXED_PROMPTS[config.language ?? "en"], fixedPrompts: FIXED_PROMPTS, promptLimit: PROMPT_LIMIT,
+              workingModel: ctx.model?.name || ctx.model?.id || "当前模型", workingThinking: pi.getThinkingLevel(),
               busy: !ctx.isIdle(), recovery: host.needsRecovery(), error: configError || host.error() || null,
               models: ctx.modelRegistry.getAll()
                 .filter(model => model.api !== "pi-virtual" && !model.id.startsWith("group/") && ctx.modelRegistry.hasConfiguredAuth(model))
-                .map(model => ({ value: modelName(model), name: model.name || model.id, provider: model.provider, id: model.id, contextWindow: model.contextWindow }))
+                .map(model => ({ value: modelName(model), name: model.name || model.id, provider: model.provider, id: model.id, contextWindow: model.contextWindow, thinkingLevels: supportedThinking(model) }))
                 .sort((a, b) =>
                   Number(b.provider === config.model?.provider) - Number(a.provider === config.model?.provider) ||
                   a.provider.localeCompare(b.provider) ||
@@ -58,9 +61,11 @@ export function createSettings(pi: ExtensionAPI, host: SettingsHost) {
               if (!(await host.recover(ctx))) throw new SettingsError("暂时无法恢复最终整理状态，请稍后重试。", 409);
               return;
             }
-            if (Object.keys(input).some(key => key !== "enabled" && key !== "model" && key !== "revision") || typeof input.revision !== "string" || typeof input.enabled !== "boolean" || (input.model !== null && typeof input.model !== "string")) {
+            if (Object.keys(input).some(key => !["enabled", "model", "thinking", "prompt", "language", "revision"].includes(key)) || typeof input.revision !== "string" || typeof input.enabled !== "boolean" || (input.model !== null && typeof input.model !== "string")
+              || (input.thinking != null && !isThinking(input.thinking)) || (input.prompt != null && typeof input.prompt !== "string") || (input.language != null && !isLanguage(input.language))) {
               throw new SettingsError("设置格式无效。");
             }
+            if (input.prompt != null && !validPrompt(input.prompt)) throw new SettingsError("提示词不能为空，且不超过 4000 字。");
             let model;
             try { model = input.model ? parseModel(input.model as string) : undefined; }
             catch { throw new SettingsError("请选择具体模型。"); }
@@ -73,7 +78,7 @@ export function createSettings(pi: ExtensionAPI, host: SettingsHost) {
             if (input.enabled && !model) throw new SettingsError("请先选择最终答复模型。");
             if (host.needsRecovery() && !(await host.recover(ctx))) throw new SettingsError("请先恢复最终整理状态，再保存设置。", 409);
             if (generation !== currentGeneration || !ctx.isIdle()) throw new SettingsError("会话状态已变化，请重试。", 409);
-            const next: Config = { enabled: input.enabled, model, settingsOpened: true };
+            const next: Config = { enabled: input.enabled, model, thinking: (input.thinking ?? undefined) as Config["thinking"], prompt: (input.prompt ?? undefined) as string | undefined, language: (input.language ?? old.language) as Config["language"], settingsOpened: true, lastSeenVersion: old.lastSeenVersion };
             try { host.apply(saveConfig(next, input.revision as string), ctx, true); }
             catch (error) { if (error instanceof ConfigConflict) throw new SettingsError(error.message, 409); throw error; }
           });
@@ -89,7 +94,9 @@ export function createSettings(pi: ExtensionAPI, host: SettingsHost) {
         if (result.code !== 0) { ctx.ui.notify(`请在浏览器打开设置：${url}`, "warning"); return; }
         // Mark only successful launches, preserving settings written by another session.
         let latest = readConfig();
-        if (!latest.settingsOpened) latest = saveConfig({ ...latest, settingsOpened: true });
+        if (!latest.settingsOpened || !latest.lastSeenVersion) {
+          latest = saveConfig({ ...latest, settingsOpened: true, lastSeenVersion: latest.lastSeenVersion ?? host.config().lastSeenVersion });
+        }
         host.apply(latest, ctx, false);
       } catch (error) {
         if (generation === currentGeneration) ctx.ui.notify(`无法打开设置：${error instanceof Error ? error.message : String(error)}${bridge ? `\n${bridge.url}` : ""}`, "error");

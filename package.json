@@ -29,6 +29,7 @@
     "LICENSE"
   ],
   "pi": {
+    "changelogPath": "",
     "extensions": [
       "./src/index.ts"
     ]
