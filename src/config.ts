@@ -12,8 +12,8 @@ export interface Config { enabled: boolean; model?: ModelRef; thinking?: Thinkin
 /** The editable part of the rewrite instruction; fixed constraints are always appended. */
 export const DEFAULT_PROMPT = "请根据用户需求、实际执行过程和工具结果，重写上一条助手最终答复，直接回答原始用户任务。遵循用户要求的语言、长度和格式，保留必要的确认问题；区分已完成、未验证和受阻事项，不虚构验证、提交或发布结果。";
 export const DEFAULT_PROMPT_EN = "Rewrite the assistant's previous final answer to directly address the user's task based on the user's request and tool execution summary. Follow the user's requested language, length, and format, keep necessary clarifying questions, clearly distinguish completed, unverified, and blocked items, and never fabricate verification, commits, or releases.";
-export const FIXED_PROMPT = "不要继续执行任务、调用工具、询问下一项任务、提及换模型或添加模型标记。";
-export const FIXED_PROMPT_EN = "Do not continue executing tasks, call tools, ask for the next task, mention switching models, or add model markers.";
+export const FIXED_PROMPT = "只改表达，不删事实：草稿里的未验证、未测试、未提交、未部署、受阻、风险和待用户决定事项必须逐条保留；文件路径、命令、提交号、版本号、数字和链接按原文保留。不要添加草稿中没有的比喻或内容。不要继续执行任务、调用工具、询问下一项任务、提及换模型或添加模型标记。";
+export const FIXED_PROMPT_EN = "Change wording only, never drop facts: keep every unverified, untested, uncommitted, undeployed, blocked, risky, or awaiting-user-decision item from the draft; keep file paths, commands, commit hashes, versions, numbers, and links exactly as written. Do not add metaphors or content absent from the draft. Do not continue executing tasks, call tools, ask for the next task, mention switching models, or add model markers.";
 export const DEFAULT_PROMPTS: Record<Language, string> = { "zh-CN": DEFAULT_PROMPT, en: DEFAULT_PROMPT_EN };
 export const FIXED_PROMPTS: Record<Language, string> = { "zh-CN": FIXED_PROMPT, en: FIXED_PROMPT_EN };
 export const PROMPT_LIMIT = 4000;
